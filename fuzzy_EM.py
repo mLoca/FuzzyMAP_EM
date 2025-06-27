@@ -724,10 +724,13 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
     transition_model = MedicalTransitionModel()
     observation_model = ContinuousObservationModel(STATES, ACTIONS)
 
-    true_rewards = []
-    fuzzy_predicted_rewards = []
-    true_next_obs = []
-    pred_next_obs = []
+    true_next_obs_healthy = []
+    true_next_obs_sick = []
+    true_next_obs_critical = []
+
+    pred_next_obs_healthy = []
+    pred_next_obs_sick = []
+    pred_next_obs_critical = []
     all_actions = [MedAction(a) for a in ["wait", "treat"]]
     all_states = [State(s) for s in ["healthy", "sick", "critical"]]
 
@@ -747,43 +750,45 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
             fuzzy_model.set_variable("symptoms", actual_obs[1])
             pred_obs = fuzzy_model.Sugeno_inference(["next_test", "next_symptoms"])
             # Record metrics
-            true_next_obs.append(actual_obs)
-            pred_next_obs.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
+            if current_state.name == "healthy":
+                true_next_obs_healthy.append(actual_obs)
+                pred_next_obs_healthy.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
+            elif current_state.name == "sick":
+                true_next_obs_sick.append(actual_obs)
+                pred_next_obs_sick.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
+            elif current_state.name == "critical":
+                true_next_obs_critical.append(actual_obs)
+                pred_next_obs_critical.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
+
             current_state = next_state
 
     # Convert to numpy arrays
-    y_true = np.array(true_rewards)
-    y_pred = np.array(fuzzy_predicted_rewards)
-    test_true = np.array([obs[0] for obs in true_next_obs])
-    test_pred = np.array([obs[0] for obs in pred_next_obs])
-    symp_true = np.array([obs[1] for obs in true_next_obs])
-    symp_pred = np.array([obs[1] for obs in pred_next_obs])
+    for output in [(true_next_obs_healthy,pred_next_obs_healthy),
+                (true_next_obs_sick,pred_next_obs_sick),
+                (true_next_obs_critical,pred_next_obs_critical)]:
+        true_next_obs = output[0]
+        pred_next_obs = output[1]
+        test_true = np.array([obs[0] for obs in true_next_obs])
+        test_pred = np.array([obs[0] for obs in pred_next_obs])
+        symp_true = np.array([obs[1] for obs in true_next_obs])
+        symp_pred = np.array([obs[1] for obs in pred_next_obs])
 
-    # Reward metrics
-    r2_test = 0.0
-    r_test = 0.0
-    r2_sym = 0.0
-    r_sym = 0.0
+        r2_test = r2_score(test_true, test_pred)
+        r2_sym = r2_score(symp_true, symp_pred)
 
-    r2_test = r2_score(test_true, test_pred)
+        # Observation prediction accuracy
+        #obs_accuracy = np.mean([t == p for t, p in zip(true_next_obs, pred_next_obs)])
 
-    r_test = np.corrcoef(test_true, test_pred)[0, 1]
-    r2_sym = r2_score(symp_true, symp_pred)
-    r_sym = np.corrcoef(symp_true, symp_pred)[0, 1]
-
-    # Observation prediction accuracy
-    #obs_accuracy = np.mean([t == p for t, p in zip(true_next_obs, pred_next_obs)])
-
-    # Print results
-    print("\n--- Fuzzy Reward & Observation Prediction Performance ---")
-    print(f"Total steps: {trials * horizon}")
-    print(f"Test Result R²: {r2_test:.4f}")
-    print(f"Symptoms R²: {r2_sym:.4f}")
+        # Print results
+        print("\n--- Fuzzy Reward & Observation Prediction Performance ---")
+        print(f"Total steps: {trials * horizon}")
+        print(f"Test Result R²: {r2_test:.4f}")
+        print(f"Symptoms R²: {r2_sym:.4f}")
 
     return
 
 
 if __name__ == "__main__":
     learned_pomdp = main()
-    #evaluate_fuzzy_reward_prediction()
+    #evaluate_fuzzy_reward_prediction(trials=500, horizon=10)
     #sensitivity_results = rho_sensitivity_analysis()
