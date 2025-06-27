@@ -50,8 +50,14 @@ def collect_data(trials=1000, horizon=10):
 
 def build_fuzzymodel():
     # Load and learn the fuzzy model from the data with next_test as output variable
+
+    #np.random.seed(15)
+    #random.seed(15)
+
     nr_clus = 3
-    df = collect_data(trials=105, horizon=10)
+    df = collect_data(trials=500, horizon=10)
+    # df to excel
+    df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
     df_test = df[["test_result", "symptoms", "action", "next_test"]]
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
                  variable_names=['test_result', 'symptoms', 'action', 'next_test'], )
