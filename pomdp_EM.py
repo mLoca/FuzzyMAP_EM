@@ -223,7 +223,7 @@ class PomdpEM:
 
         return log_likelihood
 
-    def compare_state_transitions(self, learned_transitions, baseline_transitions, states_list, state_mapping=None):
+    def compare_state_transitions(self, learned_transitions, baseline_transitions, baseline_observations, states_list, state_mapping=None):
         """
         Compares the transition probabilities for a user-selected state between
         a learned model and a baseline model.
@@ -310,7 +310,7 @@ class PomdpEM:
 
         # Compute KL divergence between observation distributions
         kl_divergences = np.zeros((len(states_list)))
-        obs_model_real = ContinuousObservationModel(STATES, ACTIONS)
+        obs_model_real = baseline_observations
         for s in range(len(states_list)):
             state_name = states_list[s].name
 
@@ -433,6 +433,7 @@ def run_pomdp_reconstruction():
     standard_pomdp.compare_state_transitions(
         standard_pomdp.transitions,
         original_pomdp.env.transition_model.transitions,
+        original_pomdp.agent.observation_model,
         STATES
     )
 

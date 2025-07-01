@@ -1,20 +1,16 @@
 import random
 
-import numpy as np
 import matplotlib.pyplot as plt
-import pomdp_py
-from scipy.stats import multivariate_normal, norm, entropy
-
+import numpy as np
+from scipy.stats import norm
 from sklearn.metrics import r2_score
 
 import utils
-from pomdp_EM import PomdpEM
-
-from fuzzy_model import build_fuzzymodel
 from continouos_pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
-from continouos_pomdp_example import (plot_observation_distribution,
-                                      create_continuous_medical_pomdp,
+from continouos_pomdp_example import (generate_pomdp_data,
                                       STATES, ACTIONS, ContinuousObservationModel)
+from fuzzy_model import build_fuzzymodel
+from pomdp_EM import PomdpEM
 
 DEFAULT_PARAMS_TRANS = [
     [[0.85, 0.14, 0.01],
@@ -333,7 +329,7 @@ class FuzzyPOMDP(PomdpEM):
 
         return
 
-    def maximization_step_AA(self, observations, actions, gammas, xis):
+    def maximization_step_wsim(self, observations, actions, gammas, xis):
         """M-step: Update model parameters based on expected sufficient statistics"""
         n_sequences = len(observations)
         self.initial_prob = np.zeros(self.n_states)
@@ -577,61 +573,9 @@ def plot_sensitivity_results(results):
     plt.show()
 
 
-def generate_pomdp_data(n_trajectories, trajectory_length, seed=None):
-    """Generate training data from original POMDP model"""
-    if seed is not None:
-        random.seed(seed)
-        np.random.seed(seed)
-
-    print("Generating training data...")
-    observations = []
-    actions = []
-    true_states = []
-    rewards = []
-
-    for traj in range(n_trajectories):
-        # Reset environment for new trajectory
-        pomdp = create_continuous_medical_pomdp()
-        pomdp.agent.set_belief(pomdp_py.Histogram({
-            State("healthy"): 1 / 3, State("sick"): 1 / 3, State("critical"): 1 / 3
-        }))
-
-        traj_observations, traj_actions = [], []
-        traj_states, traj_rewards = [], []
-
-        for _ in range(trajectory_length):
-            # Get current state
-            current_state = pomdp.env.state
-            traj_states.append(STATES.index(current_state))
-
-            # Select random action (for data collection)
-            action = random.choice(ACTIONS)
-            action_idx = ACTIONS.index(action)
-            traj_actions.append(action_idx)
-
-            # Execute action and get observation
-            reward = pomdp.env.state_transition(action, execute=True)
-            traj_rewards.append(reward)
-
-            # Get observation with noise
-            observation = pomdp.agent.observation_model.sample(pomdp.env.state, action)
-            noise = np.random.normal(0, 0.25, size=len(observation))
-            noisy_observation = np.clip(observation + noise, 0, 1)
-            traj_observations.append(noisy_observation)
-
-        observations.append(np.array(traj_observations))
-        actions.append(np.array(traj_actions))
-        true_states.append(np.array(traj_states))
-        rewards.append(np.array(traj_rewards))
-
-    print(f"Generated {n_trajectories} trajectories of length {trajectory_length}")
-    return pomdp, observations, actions, true_states, rewards
-
-
 def train_pomdp_model(observations, actions, use_fuzzy, n_states, n_actions, obs_dim, max_iterations, tolerance):
     """Train a POMDP model using the provided data"""
-    model_type = "Fuzzy" if use_fuzzy else "Standard"
-    print(f"Training {model_type} POMDP model...")
+    print(f"Training standard POMDP model...")
 
     model = FuzzyPOMDP(
         n_states=n_states,
@@ -640,7 +584,7 @@ def train_pomdp_model(observations, actions, use_fuzzy, n_states, n_actions, obs
         use_fuzzy=use_fuzzy,
         rho_T=0.0,
         rho_O=0.0,
-        fix_observations=DEFAULT_OBS_PARAMS,  # Set to None to allow learning transitions
+        fix_transitions=None,  # Set to None to allow learning transitions
     )
 
     log_likelihood = model.fit(
@@ -650,7 +594,7 @@ def train_pomdp_model(observations, actions, use_fuzzy, n_states, n_actions, obs
         tolerance=tolerance
     )
 
-    print(f"{model_type} POMDP training completed. Final log-likelihood: {log_likelihood:.4f}")
+    print(f"Standard POMDP training completed. Final log-likelihood: {log_likelihood:.4f}")
     return model, log_likelihood
 
 
@@ -685,7 +629,7 @@ def visualize_observation_distributions(model, n_states, title_prefix=""):
 def run_pomdp_reconstruction():
     """Main experiment function for POMDP reconstruction"""
     # Parameters
-    n_trajectories = 15
+    n_trajectories = 25
     trajectory_length = 5
     n_states = 3  # healthy, sick, critical
     n_actions = 2  # wait, treat
@@ -697,23 +641,28 @@ def run_pomdp_reconstruction():
         n_trajectories, trajectory_length, seed=seed
     )
 
+    fuzzy_model = build_fuzzymodel()
+    evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model)
+
     # Train fuzzy POMDP model
     fuzzy_pomdp = FuzzyPOMDP(
         n_states=n_states,
         n_actions=n_actions,
         obs_dim=obs_dim,
         use_fuzzy=True,
-        fuzzy_model=build_fuzzymodel(),
-        rho_T=0.5,
-        rho_O=0.00,
-        verbose=False,
-        fix_observations=DEFAULT_OBS_PARAMS# Set to None to allow learning transitions
+        fuzzy_model=fuzzy_model,
+        rho_T=0.1,
+        rho_O=0.0,
+        verbose=False
+        # fix_transitions=np.array(DEFAULT_PARAMS_TRANS),  # Set to None to allow learning transitions
     )
 
     fuzzy_ll = fuzzy_pomdp.fit(
         observations, actions,
         max_iterations=200, tolerance=1e-8
     )
+
+    print(f"Fuzzy POMDP transitions:\n{fuzzy_pomdp.transitions}")
 
     # Visualize fuzzy model results
     visualize_observation_distributions(fuzzy_pomdp, n_states, title_prefix="Fuzzy")
@@ -723,6 +672,7 @@ def run_pomdp_reconstruction():
     fuzzy_pomdp.compare_state_transitions(
         fuzzy_pomdp.transitions,
         original_pomdp.env.transition_model.transitions,
+        original_pomdp.agent.observation_model,
         STATES
     )
 
@@ -733,19 +683,22 @@ def run_pomdp_reconstruction():
         max_iterations=200, tolerance=1e-8
     )
 
+    print(f"Standard POMDP transitions:\n{standard_pomdp.transitions}")
+
     # Visualize standard model results
     visualize_observation_distributions(standard_pomdp, n_states, title_prefix="Standard")
     plt.show()
 
     # Compare with original observation distribution
-    print("\nComparing with original observation distributions...")
-    plot_observation_distribution()
+    #print("\nComparing with original observation distributions...")
+    #plot_observation_distribution()
 
     # Compare standard model with original model
     print("Evaluating standard model against original model...")
     standard_pomdp.compare_state_transitions(
         standard_pomdp.transitions,
         original_pomdp.env.transition_model.transitions,
+        original_pomdp.agent.observation_model,
         STATES
     )
 
@@ -763,7 +716,7 @@ def main():
     return best_model
 
 
-def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
+def evaluate_fuzzy_reward_prediction(trials=200, horizon=10, fuzzy_model=None, pomdp=None):
     """
     Compares the reward predicted by the fuzzy model against the true reward
     and evaluates next-observation prediction accuracy over simulated trajectories.
@@ -772,10 +725,10 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
     np.random.seed(42)
     random.seed(42)
 
-    base_reward_model = MedicalRewardModel()
-    fuzzy_model = build_fuzzymodel()
-    transition_model = MedicalTransitionModel()
-    observation_model = ContinuousObservationModel(STATES, ACTIONS)
+    base_reward_model = pomdp.agent.reward_model if pomdp is not None else MedicalRewardModel()
+    fuzzy_model = fuzzy_model if fuzzy_model is not None else build_fuzzymodel(pomdp=pomdp)
+    transition_model = pomdp.agent.transition_model if pomdp is not None else MedicalTransitionModel()
+    observation_model = pomdp.agent.observation_model if pomdp is not None else ContinuousObservationModel(STATES, ACTIONS)
 
     true_next_obs_healthy = []
     true_next_obs_sick = []
@@ -798,7 +751,7 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
             r_true = base_reward_model.sample(current_state, action, next_state)
             # Fuzzy prediction
             action_fm = 0 if action.name == "wait" else 1
-            fuzzy_model.set_variable("action_input", action_fm)
+            fuzzy_model.set_variable("action", action_fm)
             fuzzy_model.set_variable("test_result", actual_obs[0])
             fuzzy_model.set_variable("symptoms", actual_obs[1])
             pred_obs = fuzzy_model.Sugeno_inference(["next_test", "next_symptoms"])
@@ -816,9 +769,9 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
             current_state = next_state
 
     # Convert to numpy arrays
-    for output in [(true_next_obs_healthy,pred_next_obs_healthy),
-                (true_next_obs_sick,pred_next_obs_sick),
-                (true_next_obs_critical,pred_next_obs_critical)]:
+    for output in [(true_next_obs_healthy, pred_next_obs_healthy),
+                   (true_next_obs_sick, pred_next_obs_sick),
+                   (true_next_obs_critical, pred_next_obs_critical)]:
         true_next_obs = output[0]
         pred_next_obs = output[1]
         test_true = np.array([obs[0] for obs in true_next_obs])
@@ -843,5 +796,5 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10):
 
 if __name__ == "__main__":
     learned_pomdp = main()
-    #evaluate_fuzzy_reward_prediction(trials=500, horizon=10)
+    #evaluate_fuzzy_reward_prediction(trials=200, horizon=10)
     #sensitivity_results = rho_sensitivity_analysis()

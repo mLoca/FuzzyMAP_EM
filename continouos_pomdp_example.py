@@ -20,9 +20,9 @@ DEFAULT_OBS_PARAMS = {
     # Sano: Test per lo più negativo, sintomi per lo più assenti
     "healthy": (1.8, 7.5, 2, 10),
     # Malato: Test misto ma per lo più negativo, sintomi per lo più presenti
-    "sick": (2.8, 5, 8, 2),
+    "sick": (2.5, 4.5, 4, 4.5),
     # Critico: Test per lo più positivo, sintomi fortemente presenti
-    "critical": (7.3, 2, 8.9, 2.5)
+    "critical": (9, 2, 8.9, 2.5)
 }
 DEFAULT_TRANS_PARAMS = {
     # Wait action transitions
@@ -30,8 +30,8 @@ DEFAULT_TRANS_PARAMS = {
     ('wait', 'healthy', 'sick'): 0.14,
     ('wait', 'healthy', 'critical'): 0.01,
     ('wait', 'sick', 'healthy'): 0.3,
-    ('wait', 'sick', 'sick'): 0.6,
-    ('wait', 'sick', 'critical'): 0.1,
+    ('wait', 'sick', 'sick'): 0.5,
+    ('wait', 'sick', 'critical'): 0.2,
     ('wait', 'critical', 'healthy'): 0.01,
     ('wait', 'critical', 'sick'): 0.05,
     ('wait', 'critical', 'critical'): 0.94,
@@ -44,8 +44,8 @@ DEFAULT_TRANS_PARAMS = {
     ('treat', 'sick', 'sick'): 0.35,
     ('treat', 'sick', 'critical'): 0.0,
     ('treat', 'critical', 'healthy'): 0.1,
-    ('treat', 'critical', 'sick'): 0.65,
-    ('treat', 'critical', 'critical'): 0.25,
+    ('treat', 'critical', 'sick'): 0.6,
+    ('treat', 'critical', 'critical'): 0.3,
 }
 
 
@@ -115,7 +115,7 @@ class ContinuousObservationModel(ObservationModel):
         plt.savefig("sick_test_distribution.png")
 
 
-def generate_pomdp_data(n_trajectories, trajectory_length, seed=None):
+def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd = 0.01, seed=None , pomdp=None):
     """Generate  data from POMDP model"""
     if seed is not None:
         random.seed(seed)
@@ -129,7 +129,10 @@ def generate_pomdp_data(n_trajectories, trajectory_length, seed=None):
 
     for traj in range(n_trajectories):
         # Reset environment for new trajectory
-        pomdp = create_continuous_medical_pomdp()
+        if pomdp is None:
+            pomdp = create_continuous_medical_pomdp()
+        else:
+            pomdp = reset_pomdp(pomdp)
         pomdp.agent.set_belief(pomdp_py.Histogram({
             State("healthy"): 1 / 3, State("sick"): 1 / 3, State("critical"): 1 / 3
         }))
@@ -153,7 +156,7 @@ def generate_pomdp_data(n_trajectories, trajectory_length, seed=None):
 
             # Get observation with noise
             observation = pomdp.agent.observation_model.sample(pomdp.env.state, action)
-            noise = np.random.normal(0, 0.25, size=len(observation))
+            noise = np.random.normal(0, noise_sd, size=len(observation))
             noisy_observation = np.clip(observation + noise, 0, 1)
             traj_observations.append(noisy_observation)
 
@@ -198,6 +201,24 @@ def create_continuous_medical_pomdp(init_state=None, trans_params=None, obs_para
                       reward_model=reward_model)
     return POMDP(agent, env)
 
+def reset_pomdp(pomdp):
+    """
+    Create a new POMDP instance from an existing one.
+    This is useful for resetting the environment without losing the agent's configuration.
+    """
+    init_belief = pomdp_py.Histogram({
+        State("healthy"): 1 / 3,
+        State("sick"): 1 / 3,
+        State("critical"): 1 / 3
+    })
+
+    pomdp.agent.set_belief(init_belief, prior=True)
+    pomdp.agent.tree = None
+
+    return POMDP(
+        agent=pomdp.agent,
+        env=pomdp.env
+    )
 
 def plot_observation_distribution(n_samples=5000):
     # Instantiate the continuous observation model
@@ -260,91 +281,10 @@ def predict_next_observation_reward(fuzzy_model, current_observation, action):
     return np.array([next_test_val, next_symptom_val]), reward_val
 
 
-""" 
-def evaluate_fuzzy_reward_prediction(trials=100, horizon=20):
-
-    #Compares the reward predicted by the fuzzy model against the true reward
-    #and evaluates next-observation prediction accuracy over simulated trajectories.
-
-
-    np.random.seed(42)
-    random.seed(42)
-
-    base_reward_model = MedicalRewardModel()
-    fuzzy_model = build_fuzzymodel()
-    transition_model = MedicalTransitionModel()
-    observation_model = ContinuousObservationModel(STATES, ACTIONS)
-
-    true_rewards = []
-    fuzzy_predicted_rewards = []
-    true_next_obs = []
-    pred_next_obs = []
-    all_actions = [MedAction(a) for a in ["wait", "treat"]]
-    all_states = [State(s) for s in ["healthy", "sick", "critical"]]
-
-    for _ in range(trials):
-        current_state = random.choice(all_states)
-        for _ in range(horizon):
-            action = random.choice(all_actions)
-            # Sample next state and true next observation
-            next_state = transition_model.sample(current_state, action)
-            actual_obs = observation_model.sample(next_state, action)
-            # True reward
-            r_true = base_reward_model.sample(current_state, action, next_state)
-            # Fuzzy prediction
-            pred_obs, r_fuzzy = predict_next_observation_reward(fuzzy_model,
-                                                                observation_model.sample(current_state, action),
-                                                                action)
-            # Record metrics
-            true_rewards.append(r_true)
-            fuzzy_predicted_rewards.append(r_fuzzy)
-            true_next_obs.append(actual_obs)
-            pred_next_obs.append(pred_obs)
-            current_state = next_state
-
-    # Convert to numpy arrays
-    y_true = np.array(true_rewards)
-    y_pred = np.array(fuzzy_predicted_rewards)
-    test_true = np.array([obs[0] for obs in true_next_obs])
-    test_pred = np.array([obs[0] for obs in pred_next_obs])
-    symp_true = np.array([obs[1] for obs in true_next_obs])
-    symp_pred = np.array([obs[1] for obs in pred_next_obs])
-
-    # Reward metrics
-    r2_test = 0.0
-    r_test = 0.0
-    r2_sym = 0.0
-    r_sym = 0.0
-
-    if np.var(y_true) == 0 or np.var(y_pred) == 0:
-        r2_rew = 0.0 if np.var(y_true) == 0 else r2_score(y_true, y_pred)
-        r_rew = 0.0
-        print("Warning: Constant data encountered in rewards, metrics might be misleading.")
-    else:
-        r2_rew = r2_score(y_true, y_pred)
-        r_rew = np.corrcoef(y_true, y_pred)[0, 1]
-        r2_test = r2_score(test_true, test_pred)
-        r_test = np.corrcoef(test_true, test_pred)[0, 1]
-        r2_sym = r2_score(symp_true, symp_pred)
-        r_sym = np.corrcoef(y_true, y_pred)[0, 1]
-
-    # Observation prediction accuracy
-    #obs_accuracy = np.mean([t == p for t, p in zip(true_next_obs, pred_next_obs)])
-
-    # Print results
-    print("\n--- Fuzzy Reward & Observation Prediction Performance ---")
-    print(f"Total steps: {trials * horizon}")
-    print(f"Reward R²: {r2_rew:.4f}, Pearson’s r: {r_rew:.4f}")
-    print(f"Test Result R²: {r2_test:.4f}, Pearson’s r: {r_test:.4f}")
-    print(f"Symptoms R²: {r2_sym:.4f}, Pearson’s r: {r_sym:.4f}")
-
-    return r2_rew, r_rew, r2_test
-
-"""
-
 if __name__ == "__main__":
     # Create the POMDP
     pomdp = create_continuous_medical_pomdp(init_state="healthy")
+    pomdp.agent.observation_model.plot_observation_distribution()
     #pomdp.agent.observation_model.plot_observation_distribution()
     # Evaluate the fuzzy model's performance
     #evaluate_fuzzy_reward_prediction(trials=5, horizon=10)

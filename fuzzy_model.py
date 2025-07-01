@@ -2,7 +2,7 @@ import random
 from typing import Tuple
 
 import numpy as np
-from continouos_pomdp_example import create_continuous_medical_pomdp, ACTIONS
+from continouos_pomdp_example import create_continuous_medical_pomdp, ACTIONS, reset_pomdp
 import pandas as pd
 from pyfume import BuildTakagiSugeno, pyFUME, SugenoFISTester, DataSplitter, FeatureSelector, DataLoader, Clusterer, \
     AntecedentEstimator, FireStrengthCalculator, ConsequentEstimator, SugenoFISBuilder
@@ -10,15 +10,31 @@ from pyfume import BuildTakagiSugeno, pyFUME, SugenoFISTester, DataSplitter, Fea
 
 
 
-def collect_data(trials=1000, horizon=10):
+def collect_data(trials=1000, horizon=10, pomdp=None):
     data = []
 
+    count ={
+        'critical': 0,
+        'sick': 0,
+        'healthy': 0,
+    }
+
     for episode in range(trials):
-        random.seed(episode)  # For reproducibility
+        #random.seed(episode)  # For reproducibility
         # Reset environment with random initial state
-        pomdp = create_continuous_medical_pomdp()
+        if pomdp is None:
+            pomdp = create_continuous_medical_pomdp()
+        else:
+            pomdp = reset_pomdp(pomdp)
+
         observation = pomdp.agent.observation_model.sample(pomdp.env.state, None)
         total_reward = 0
+        if pomdp.env.state.name == "critical":
+            count["critical"] += 1
+        if pomdp.env.state.name == "sick":
+            count["sick"] += 1
+        if pomdp.env.state.name == "healthy":
+            count["healthy"] += 1
 
         for step in range(horizon):
             # Random action
@@ -29,6 +45,13 @@ def collect_data(trials=1000, horizon=10):
             reward = pomdp.env.state_transition(action, execute=True)
             next_state = pomdp.env.state
             next_observation = pomdp.agent.observation_model.sample(next_state, action)
+
+            if next_state.name == "critical":
+                count["critical"] += 1
+            if next_state.name == "sick":
+                count["sick"] += 1
+            if next_state.name == "healthy":
+                count["healthy"] += 1
 
             # Collect data
             data.append({
@@ -43,27 +66,31 @@ def collect_data(trials=1000, horizon=10):
             total_reward += reward
             observation = next_observation
 
+
+    print(f"Total critical states encountered: {count['critical']}")
+    print(f"Total sick states encountered: {count['sick']}")
+    print(f"Total healthy states encountered: {count['healthy']}")
     # Create DataFrame from collected data
     df = pd.DataFrame(data)
     return df
 
 
-def build_fuzzymodel():
+def build_fuzzymodel(pomdp = None):
     # Load and learn the fuzzy model from the data with next_test as output variable
 
-    #np.random.seed(15)
-    #random.seed(15)
+    np.random.seed(15)
+    random.seed(15)
 
     nr_clus = 3
-    df = collect_data(trials=500, horizon=10)
+    df = collect_data(trials=600, horizon=10, pomdp=pomdp)
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
     df_test = df[["test_result", "symptoms", "action", "next_test"]]
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
                  variable_names=['test_result', 'symptoms', 'action', 'next_test'], )
 
-    print("the mean squared error of the created model is", FIS.calculate_error("MSE"))
-    print("the mean area error of the created model is", FIS.calculate_error("MAE"))
+    #print("the mean squared error of the created model is", FIS.calculate_error("MSE"))
+    #print("the mean area error of the created model is", FIS.calculate_error("MAE"))
     model = []
 
     #Add the rules of the FIS model to include the next_symptoms as output variable

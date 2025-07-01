@@ -12,31 +12,25 @@ def _load_pomdp_config(config_path):
 
 
 def get_experiment_config(n_states=None):
-    config = _load_pomdp_config('experiment_config.json')
-    return_obj = {
-        "n_states": config["n_states"] if n_states is None else n_states,
-        "n_actions": config["n_actions"],
-        "obs_dim": config["obs_dim"],
-        "use_fuzzy": config["use_fuzzy"],
-        "rho_T": config["rho_T"],
-        "rho_O": config["rho_O"],
-        "transitions": config["transitions"],
-        "observations": config["observations"]
-    }
-    return return_obj
+    config = _load_pomdp_config('experiment_setup.json')
+    return config
 
 
 def from_matrix_to_triplelist(transition_matrix):
     states = ["healthy", "sick", "critical"]
-    actions = ["treat", "wait"]
+    actions = ["wait", "treat"]
     triples = {}
-    for i, state in enumerate(states):
-        for j, action in enumerate(actions):
+    for j, action in enumerate(actions):
+        for i, state in enumerate(states):
             for k, next_state in enumerate(states):
-                if transition_matrix[i][j][k] > 0:
+                if transition_matrix[i][j][k] > -0.01:
                     triples.update({
-                        (state, action, next_state): transition_matrix[i][j][k]
+                        (action, state, next_state): transition_matrix[i][j][k]
                     })
+                else:
+                    # throw an error if the transition probability is negative
+                    raise ValueError(f"Transition probability for action {action}, state {state}, "
+                                     f"next state {next_state} is negative: {transition_matrix[i][j][k]}")
     return triples
 
 
@@ -46,8 +40,8 @@ def from_observation_config_to_observation(observation_config):
     for i, state in enumerate(states):
         #beta are the first and third and alha the second and fourth
         obs.update({
-            state: (observation_config[i, 0], observation_config[i, 1],
-                    observation_config[i, 2], observation_config[i, 3])
+            state: (observation_config[state][0], observation_config[state][1],
+                    observation_config[state][2], observation_config[state][3])
         })
     return obs
 
