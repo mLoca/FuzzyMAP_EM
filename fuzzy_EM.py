@@ -1,24 +1,20 @@
 import random
-from time import sleep
 
 import numpy as np
 import matplotlib.pyplot as plt
 import pomdp_py
 from scipy.stats import multivariate_normal, norm, entropy
 
-from simpful import FuzzySystem, LinguisticVariable, FuzzyAggregator, GaussianFuzzySet
-from typing import List, Dict, Tuple, Optional
-from collections import defaultdict
-
 from sklearn.metrics import r2_score
-from sklearn.mixture import GaussianMixture
 
+import utils
 from pomdp_EM import PomdpEM
 
 from fuzzy_model import build_fuzzymodel
 from continouos_pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
-from continouos_pomdp_example import plot_observation_distribution, create_continuous_medical_pomdp, STATES, ACTIONS, \
-    ContinuousObservationModel
+from continouos_pomdp_example import (plot_observation_distribution,
+                                      create_continuous_medical_pomdp,
+                                      STATES, ACTIONS, ContinuousObservationModel)
 
 DEFAULT_PARAMS_TRANS = [
     [[0.85, 0.14, 0.01],
@@ -28,6 +24,13 @@ DEFAULT_PARAMS_TRANS = [
     [[0.01, 0.05, 0.94],
      [0.1, 0.65, 0.25]]
 ]
+
+DEFAULT_OBS_PARAMS = {
+    #beta and alpha parameters for test and symptoms observations
+    "healthy": (2, 6, 2, 6),
+    "sick": (2.8, 4, 7, 3),
+    "critical": (6, 2, 6, 2)
+}
 
 
 class FuzzyPOMDP(PomdpEM):
@@ -53,6 +56,13 @@ class FuzzyPOMDP(PomdpEM):
 
         if fix_transitions is not None:
             self.transitions = np.array(fix_transitions, dtype=np.float64)
+
+        if fix_observations is not None:
+            # Convert observation parameters to means and covariances
+            tmp_observation = utils.from_beta_to_multivariate_normal(fix_observations)
+            self.obs_means = np.array(tmp_observation['means'], dtype=np.float64)
+            self.obs_covs = np.array(tmp_observation['covariances'], dtype=np.float64)
+
         # Fuzzy system for observations
         if use_fuzzy:
             if fuzzy_model is None:
@@ -91,6 +101,43 @@ class FuzzyPOMDP(PomdpEM):
                 membership_degree = fuzzy_set.get_value(O_means[state][0])
             elif (variable == "symptoms"):
                 membership_degree = fuzzy_set.get_value(O_means[state][1])
+            else:
+                membership_degree = fuzzy_set.get_value(action)
+
+            # Update the match score (you can use different aggregation methods)
+            match_score *= membership_degree
+
+        return match_score
+
+    def _match_rule_ant_wsim(self, rule, action, obs):
+        """
+        Check how much the current observation distribution given a state matches the rule.
+        :param rule:
+        :return:
+        """
+        # Extract antecedents from the rule
+        antecedents = rule.split("IF")[1].split("THEN")[0].strip().split("AND")
+        antecedents = [antecedent.strip() for antecedent in antecedents]
+
+        # Initialize match score
+        match_score = 1.0
+
+        # Iterate through each antecedent and compute the match score
+        for antecedent in antecedents:
+            antecedent = antecedent.replace("(", " ")
+            antecedent = antecedent.replace(")", " ")
+            variable, term = antecedent.split("IS")
+            variable = variable.strip()
+            term = term.strip()
+
+            # Get the fuzzy set for the variable and term
+            fuzzy_set = self.fuzzy_model.get_fuzzy_set(variable, term)
+
+            # Compute the membership degree of the current observation in the fuzzy set
+            if (variable == "test_result"):
+                membership_degree = fuzzy_set.get_value(obs[0])
+            elif (variable == "symptoms"):
+                membership_degree = fuzzy_set.get_value(obs[1])
             else:
                 membership_degree = fuzzy_set.get_value(action)
 
@@ -166,14 +213,14 @@ class FuzzyPOMDP(PomdpEM):
                               scale=std_o)
         return l_part_obs
 
-    def _simulate_data_from_current(self, state=0):
+    def _simulate_data_from_current(self, state=0, size=100):
         """
         Simulates the observation from the current observation model
         :param state:
         :return:
         """
         # Simulate the observation from the current observation model
-        obs = np.random.multivariate_normal(self.obs_means[state], self.obs_covs[state], 50)
+        obs = np.random.multivariate_normal(self.obs_means[state], self.obs_covs[state], size)
         return obs
 
     def maximization_step(self, observations, actions, gammas, xis):
@@ -190,7 +237,6 @@ class FuzzyPOMDP(PomdpEM):
         # Copy the parameters
         T_k = np.copy(self.transitions)
         O_means_k = np.copy(self.obs_means)
-        O_covs_k = np.copy(self.obs_covs)
 
         if self.fix_transitions is None:
             pseudo_count = np.zeros((self.n_states, self.n_actions, self.n_states))
@@ -287,7 +333,7 @@ class FuzzyPOMDP(PomdpEM):
 
         return
 
-    def maximization_step_wsim(self, observations, actions, gammas, xis):
+    def maximization_step_AA(self, observations, actions, gammas, xis):
         """M-step: Update model parameters based on expected sufficient statistics"""
         n_sequences = len(observations)
         self.initial_prob = np.zeros(self.n_states)
@@ -308,11 +354,11 @@ class FuzzyPOMDP(PomdpEM):
                     denominator = 0.0
                     for i in range(n_sequences):
                         for t in range(len(actions[i]) - 1):
-                            weight = 1
                             if actions[i][t] == a:
                                 for s_prime in range(self.n_states):
-                                    numerator[s_prime] += xis[i][t, s, s_prime] * weight
-                                denominator += gammas[i][t, s] * weight
+                                    numerator[s_prime] += xis[i][t, s, s_prime]
+                                denominator += gammas[i][t, s]
+
                     if self.use_fuzzy:
                         rules = self.fuzzy_model.get_rules()
                         for s_prime in range(self.n_states):
@@ -320,14 +366,21 @@ class FuzzyPOMDP(PomdpEM):
                             for r in rules:
                                 ps_data = np.zeros(len(sim_data))
                                 count = 0
+                                cons_s, term = self._match_rule_cons(r, a, O_means_k, s)
                                 for d in sim_data:
                                     fr_s = self._match_rule_ant_wsim(r, a, d)
-                                    cons_s, term = self._match_rule_cons_wsim(r, a, d)
-                                    pdf_s_prime = self._compute_pdf(s_prime, cons_s, term, O_means_k, O_covs_k)
+                                    #cons_s, term = self._match_rule_cons(r, a, s)
+                                    y_cons = np.copy(O_means_k[s])  # Start with mean of premise state
+                                    if term == "next_test":
+                                        y_cons[0] = cons_s
+                                    else:  # next_symptoms
+                                        y_cons[1] = cons_s
+
+                                    pdf_s_prime = self.observation_likelihood(y_cons, s_prime)
                                     ps_data[count] = fr_s * pdf_s_prime
                                     count += 1
                                 ps_count += np.average(ps_data)
-                            pseudo_count[s, a, s_prime] += ps_count * self.rho
+                            pseudo_count[s, a, s_prime] += ps_count * self.rho_T
                     if denominator > 0:
                         numerator += pseudo_count[s, a, :]
                         denominator += np.sum(pseudo_count[s, a, :])
@@ -360,11 +413,12 @@ class FuzzyPOMDP(PomdpEM):
                             cons_data = np.zeros(len(sim_data))
                             for r in rules:
                                 index = 0
+                                cons_s, term = self._match_rule_cons(r, a, O_means_k, old_s)
                                 for sim_obs in sim_data:
-                                    fr_s = self._match_rule_ant(r, a, O_means_k, old_s)
+                                    fr_s = self._match_rule_ant_wsim(r, a, sim_obs)
                                     prob_new_s = T_k[old_s, a, s]
-                                    cons_s, term = self._match_rule_cons(r, a, O_means_k, old_s)
-                                    strength = fr_s * prob_new_s * self.rho
+                                    #cons_s, term = self._match_rule_cons(r, a, O_means_k, old_s)
+                                    strength = fr_s * prob_new_s * self.rho_O
                                     strength_data[index] = strength
                                     cons_data[index] = cons_s
                                     index += 1
@@ -586,7 +640,7 @@ def train_pomdp_model(observations, actions, use_fuzzy, n_states, n_actions, obs
         use_fuzzy=use_fuzzy,
         rho_T=0.0,
         rho_O=0.0,
-        fix_transitions=DEFAULT_PARAMS_TRANS,  # Set to None to allow learning transitions
+        fix_observations=DEFAULT_OBS_PARAMS,  # Set to None to allow learning transitions
     )
 
     log_likelihood = model.fit(
@@ -603,7 +657,6 @@ def train_pomdp_model(observations, actions, use_fuzzy, n_states, n_actions, obs
 def visualize_observation_distributions(model, n_states, title_prefix=""):
     """Visualize the observation distributions for each state"""
     plt.figure(figsize=(15, 5))
-    state_names = ["Healthy", "Sick", "Critical"]
 
     for s in range(n_states):
         plt.subplot(1, 3, s + 1)
@@ -621,7 +674,7 @@ def visualize_observation_distributions(model, n_states, title_prefix=""):
                 Z[i, j] = model.observation_likelihood(obs, s)
 
         plt.contourf(X, Y, Z, levels=20, cmap='viridis')
-        plt.title(f"{title_prefix} State {state_names[s]}")
+        plt.title(f"{title_prefix} State {s + 1}")
         plt.xlabel("Test Result")
         plt.ylabel("Symptoms")
         plt.colorbar()
@@ -632,12 +685,12 @@ def visualize_observation_distributions(model, n_states, title_prefix=""):
 def run_pomdp_reconstruction():
     """Main experiment function for POMDP reconstruction"""
     # Parameters
-    n_trajectories = 25
+    n_trajectories = 15
     trajectory_length = 5
     n_states = 3  # healthy, sick, critical
     n_actions = 2  # wait, treat
     obs_dim = 2  # test_result and symptoms (continuous)
-    seed = 42  # For reproducibility
+    seed = 15  # For reproducibility
 
     # Generate training data
     original_pomdp, observations, actions, true_states, rewards = generate_pomdp_data(
@@ -651,10 +704,10 @@ def run_pomdp_reconstruction():
         obs_dim=obs_dim,
         use_fuzzy=True,
         fuzzy_model=build_fuzzymodel(),
-        rho_T=0.0,
-        rho_O=0.1,
+        rho_T=0.5,
+        rho_O=0.00,
         verbose=False,
-        fix_transitions=np.array(DEFAULT_PARAMS_TRANS),  # Set to None to allow learning transitions
+        fix_observations=DEFAULT_OBS_PARAMS# Set to None to allow learning transitions
     )
 
     fuzzy_ll = fuzzy_pomdp.fit(
