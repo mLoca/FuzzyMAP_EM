@@ -15,6 +15,7 @@ from fuzzy_model import create_continuous_medical_pomdp
 from fuzzy_model import collect_data
 
 from continouos_pomdp_example import STATES, generate_pomdp_data
+from mat_fuzzy_model import create_fuzzy_model
 
 SEED = 42
 N_STATES = 3  # healthy, sick, critical
@@ -56,7 +57,8 @@ def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_m
     # to reuse the fuzzy model if it is already built
     if fuzzy_model is None:
         with utils.suppress_output():
-            fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
+            #fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
+            fuzzy_model = create_fuzzy_model()
         evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
         original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
 

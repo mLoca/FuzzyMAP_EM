@@ -3,7 +3,7 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score, root_mean_squared_error
 
 import utils
 from continouos_pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
@@ -956,19 +956,25 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10, fuzzy_model=None, p
 
             r2_test = r2_score(true_test, pred_test)
             r2_symptoms = r2_score(true_symptoms, pred_symptoms)
+            rmse_test = root_mean_squared_error(true_test, pred_test)
+            rmse_sym = root_mean_squared_error(true_symptoms, pred_symptoms)
 
             print(f"Transition {state} -> {next_state}:")
             print(f"  Count: {len(true_next_obs)}")
-            print(f"  Test Result R²: {r2_test:.4f}")
-            print(f"  Symptoms R²: {r2_symptoms:.4f}")
+            print(f"  Test Result R²: {r2_test:.4f} | MSE: {rmse_test:.4f}")
+            print(f"  Symptoms R²: {r2_symptoms:.4f} | MSE: {rmse_sym:.4f}")
 
     print("general r2 scores:")
     test_true = np.array([obs[0] for obs in true_obs])
     test_pred = np.array([obs[0] for obs in pred_obs_fm])
     symp_true = np.array([obs[1] for obs in true_obs])
     symp_pred = np.array([obs[1] for obs in pred_obs_fm])
-    print(f"Test Result R²: {r2_score(test_true, test_pred):.4f}")
-    print(f"Symptoms R²: {r2_score(symp_true, symp_pred):.4f}")
+
+    rmse_test = root_mean_squared_error(test_true, test_pred)
+    rmse_sym = root_mean_squared_error(symp_true, symp_pred)
+
+    print(f"Test Result R²: {r2_score(test_true, test_pred):.4f} | MSE: {rmse_test:.4f}")
+    print(f"Symptoms R²: {r2_score(symp_true, symp_pred):.4f} | MSE: {rmse_sym:.4f}")
     return
 
 
