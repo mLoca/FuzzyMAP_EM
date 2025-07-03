@@ -114,6 +114,55 @@ class ContinuousObservationModel(ObservationModel):
         plt.plot(x_test, y_test, label='Test Result', color='blue')
         plt.savefig("sick_test_distribution.png")
 
+    def plot_observation_distributions_2_axes(self):
+        """
+        Plot 2D joint probability density functions for test results and symptoms
+        for each state using contour plots.
+        """
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        state_names = ["healthy", "sick", "critical"]
+
+        # Create meshgrid for evaluation
+        test_vals = np.linspace(0, 1, 100)
+        symp_vals = np.linspace(0, 1, 100)
+        T, S = np.meshgrid(test_vals, symp_vals)
+
+        for i, state_name in enumerate(state_names):
+            a_t, b_t, a_s, b_s = self.params[state_name]
+
+            # Calculate joint PDF (product of individual PDFs)
+            test_pdf = beta.pdf(T, a_t, b_t)
+            symp_pdf = beta.pdf(S, a_s, b_s)
+            joint_pdf = test_pdf * symp_pdf
+
+            # Create contour plot
+            im = axes[i].contourf(T, S, joint_pdf, levels=20, cmap='viridis')
+            axes[i].set_title(f"Fuzzy State {i + 1}")
+            axes[i].set_xlabel("Test Result")
+            axes[i].set_ylabel("Symptoms")
+
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=axes[i], pad=0.01)
+
+        plt.tight_layout()
+        plt.show()
+    def plot_observation_distributions(self):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for state in self.states:
+            a_t, b_t, a_s, b_s = self.params[state.name]
+            x_test = np.linspace(0, 1, 100)
+            y_test = beta.pdf(x_test, a_t, b_t)
+            ax.plot(x_test, y_test, label=f"{state.name} - Test Result")
+
+            x_symp = np.linspace(0, 1, 100)
+            y_symp = beta.pdf(x_symp, a_s, b_s)
+            ax.plot(x_symp, y_symp, linestyle='--', label=f"{state.name} - Symptoms")
+
+        ax.set_title("Observation Distribution")
+        ax.set_xlabel("Value")
+        ax.set_ylabel("Density")
+        ax.legend()
+        plt.show()
 
 def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd = 0.01, seed=None , pomdp=None):
     """Generate  data from POMDP model"""

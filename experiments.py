@@ -30,7 +30,7 @@ PARAMETERS_CONFIG = ["FIXED_TRANSITIONS", "FIXED_OBSERVATIONS", "ZERO_CLUE",
 def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_model=None,
                    config=None,
                    transition_matrices=None,
-                   observation_parameters=None):
+                   observation_parameters=None, fig_string=None):
     """
     Run the few data experiment with fixed transition and observation models.
     """
@@ -58,24 +58,27 @@ def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_m
         with utils.suppress_output():
             fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
         evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
+        original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
 
     fit_and_performance(
         original_pomdp, observations, actions, config,
         fuzzy_model=fuzzy_model,
         fix_transitions=transition_matrices if config["fix_transitions"] else None,
-        fix_observations=observation_parameters if config["fix_observations"] else None)
+        fix_observations=observation_parameters if config["fix_observations"] else None,
+        fig_string=fig_string+"_Fuzzy.png")
 
-    #fit_and_performance(
-    #    original_pomdp, observations, actions, config,
-    #    fuzzy_model=None,
-    #    fix_transitions=transition_matrices if config["fix_transitions"] else None,
-    #    fix_observations=observation_parameters if config["fix_observations"] else None)
+    fit_and_performance(
+        original_pomdp, observations, actions, config,
+        fuzzy_model=None,
+        fix_transitions=transition_matrices if config["fix_transitions"] else None,
+        fix_observations=observation_parameters if config["fix_observations"] else None,
+        fig_string=fig_string+"_Standard.png")
 
     return fuzzy_model
 
 
 def fit_and_performance(original_pomdp, observations, actions, config, fuzzy_model=None,
-                        fix_transitions=None, fix_observations=None):
+                        fix_transitions=None, fix_observations=None, fig_string = None):
     """
     Fit the fuzzy POMDP and evaluate its performance.
     """
@@ -102,9 +105,14 @@ def fit_and_performance(original_pomdp, observations, actions, config, fuzzy_mod
     np.set_printoptions(precision=2, formatter={'float': '{: 0.2f}'.format})
     print(f"Learning POMDP transitions:\n{fuzzy_pomdp.transitions}")
 
+
+    #save the plot
     title_prefix = "Fuzzy" if use_fuzzy else "Standard"
     visualize_observation_distributions(fuzzy_pomdp, N_STATES, title_prefix=title_prefix)
     plt.show()
+    if fig_string is not None:
+        plt.savefig("img/"+fig_string)
+
 
     fuzzy_pomdp.compare_state_transitions(
         fuzzy_pomdp.transitions,
@@ -133,8 +141,8 @@ def run_set_of_experiments():
                 noise_sd = 0.02
             elif data_config == "NOISY":
                 traj_length = 5
-                n_trajectories = 15
-                noise_sd = 0.25
+                n_trajectories = 30
+                noise_sd = 0.15
             elif data_config == "FEW_DATA":
                 traj_length = 3
                 n_trajectories = 5
@@ -169,13 +177,16 @@ def run_set_of_experiments():
                     value_config["fix_observations"] = False
                     value_config["fix_observations_states"] = None
 
+                fig_string = f"{key}_{data_config}_{parameters_config}"
+
                 fuzzy_model_tmp = run_experiment(trajectory_length=traj_length,
                                                  n_trajectories=n_trajectories,
                                                  noise_sd=noise_sd,
                                                  config=value_config,
                                                  fuzzy_model=fuzzy_model_tmp,
                                                  transition_matrices=transition_matrices,
-                                                 observation_parameters=observation_parameters)
+                                                 observation_parameters=observation_parameters,
+                                                 fig_string=fig_string)
 
 
 if __name__ == "__main__":

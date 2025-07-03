@@ -248,7 +248,10 @@ class PomdpEM:
                     break
         except ValueError as e:
             print(f"An error occurred during EM fitting: {e}")
-            return None
+            return 0
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return 0
 
         return log_likelihood
 
