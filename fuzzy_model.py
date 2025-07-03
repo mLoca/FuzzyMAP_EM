@@ -82,7 +82,7 @@ def build_fuzzymodel(pomdp = None, seed = 15):
     random.seed(seed)
 
     nr_clus = 3
-    df = collect_data(trials=105, horizon=10, pomdp=pomdp)
+    df = collect_data(trials=215, horizon=5, pomdp=pomdp)
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
     df_test = df[["test_result", "symptoms", "action", "next_test"]]
