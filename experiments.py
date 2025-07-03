@@ -57,8 +57,8 @@ def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_m
     # to reuse the fuzzy model if it is already built
     if fuzzy_model is None:
         with utils.suppress_output():
-            #fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
-            fuzzy_model = create_fuzzy_model()
+            fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
+            #fuzzy_model = create_fuzzy_model()
         evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
         original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
 
@@ -84,44 +84,48 @@ def fit_and_performance(original_pomdp, observations, actions, config, fuzzy_mod
     """
     Fit the fuzzy POMDP and evaluate its performance.
     """
-    if fuzzy_model is not None:
-        use_fuzzy = True
-        rho_T = config["rho_T"]
-        rho_O = config["rho_O"]
-    else:
-        rho_T = 0.0
-        rho_O = 0.0
-        use_fuzzy = False
+    try:
+        if fuzzy_model is not None:
+            use_fuzzy = True
+            rho_T = config["rho_T"]
+            rho_O = config["rho_O"]
+        else:
+            rho_T = 0.0
+            rho_O = 0.0
+            use_fuzzy = False
 
-    fuzzy_pomdp = FuzzyPOMDP(n_states=N_STATES, n_actions=N_ACTION, obs_dim=OBS_DIM, use_fuzzy=use_fuzzy,
-                             fuzzy_model=fuzzy_model, rho_T=rho_T, rho_O=rho_O, fix_transitions=fix_transitions,
-                             fix_observations=fix_observations,
-                             fixed_observation_states=config["fix_observations_states"])
+        fuzzy_pomdp = FuzzyPOMDP(n_states=N_STATES, n_actions=N_ACTION, obs_dim=OBS_DIM, use_fuzzy=use_fuzzy,
+                                 fuzzy_model=fuzzy_model, rho_T=rho_T, rho_O=rho_O, fix_transitions=fix_transitions,
+                                 fix_observations=fix_observations,
+                                 fixed_observation_states=config["fix_observations_states"])
 
-    fuzzy_ll = fuzzy_pomdp.fit(
-        observations, actions,
-        max_iterations=200,
-        tolerance=1e-5
-    )
+        fuzzy_ll = fuzzy_pomdp.fit(
+            observations, actions,
+            max_iterations=200,
+            tolerance=1e-5
+        )
 
-    np.set_printoptions(precision=2, formatter={'float': '{: 0.2f}'.format})
-    print(f"Learning POMDP transitions:\n{fuzzy_pomdp.transitions}")
-
-
-    #save the plot
-    title_prefix = "Fuzzy" if use_fuzzy else "Standard"
-    visualize_observation_distributions(fuzzy_pomdp, N_STATES, title_prefix=title_prefix)
-    plt.show()
-    if fig_string is not None:
-        plt.savefig("img/"+fig_string)
+        np.set_printoptions(precision=2, formatter={'float': '{: 0.2f}'.format})
+        print(f"Learning POMDP transitions:\n{fuzzy_pomdp.transitions}")
 
 
-    fuzzy_pomdp.compare_state_transitions(
-        fuzzy_pomdp.transitions,
-        original_pomdp.env.transition_model.transitions,
-        original_pomdp.agent.observation_model,
-        STATES
-    )
+        #save the plot
+        title_prefix = "Fuzzy" if use_fuzzy else "Standard"
+
+        visualize_observation_distributions(fuzzy_pomdp, N_STATES, title_prefix=title_prefix)
+        if fig_string is not None:
+            plt.savefig("img/"+fig_string)
+        plt.show()
+
+        fuzzy_pomdp.compare_state_transitions(
+            fuzzy_pomdp.transitions,
+            original_pomdp.env.transition_model.transitions,
+            original_pomdp.agent.observation_model,
+            STATES
+        )
+    except Exception as e:
+        print(f"Error during fitting and performance evaluation: {e}")
+
 
 
 def run_set_of_experiments():
