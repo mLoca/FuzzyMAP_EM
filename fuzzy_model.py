@@ -75,14 +75,14 @@ def collect_data(trials=1000, horizon=10, pomdp=None):
     return df
 
 
-def build_fuzzymodel(pomdp = None):
+def build_fuzzymodel(pomdp = None, seed = 15):
     # Load and learn the fuzzy model from the data with next_test as output variable
 
-    np.random.seed(15)
-    random.seed(15)
+    np.random.seed(seed)
+    random.seed(seed)
 
     nr_clus = 3
-    df = collect_data(trials=600, horizon=10, pomdp=pomdp)
+    df = collect_data(trials=105, horizon=10, pomdp=pomdp)
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
     df_test = df[["test_result", "symptoms", "action", "next_test"]]

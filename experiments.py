@@ -4,6 +4,7 @@ For each setup of the JSON fill, we will run three different experiments:
  - fEM with fixed observation (few data and noisy observations)
  - fEM with 0 clue (few data and noisy observations)
 """
+import numpy as np
 from matplotlib import pyplot as plt
 
 import utils
@@ -15,15 +16,20 @@ from fuzzy_model import collect_data
 
 from continouos_pomdp_example import STATES, generate_pomdp_data
 
-SEED = 15
+SEED = 42
 N_STATES = 3  # healthy, sick, critical
 N_ACTION = 2  # wait, treat
 OBS_DIM = 2  # test_result and symptoms (continuous)
-DATA_CONFIG = ["NORMAL", "NOISY", "FEW_DATA"]
-PARAMETERS_CONFIG = ["FIXED_TRANSITIONS", "FIXED_OBSERVATIONS", "ZERO_CLUE"]
+DATA_CONFIG = ["NOISY"]  #TODO: add "FEW_DATA" to test with few data and normal
+
+PARAMETERS_CONFIG = ["FIXED_TRANSITIONS", "FIXED_OBSERVATIONS", "ZERO_CLUE",
+                     "FIXED_OBSERVATIONS_CRITICAL",
+                     "FIXED_OBSERVATIONS_SICK"]
 
 
-def run_experiment(trajector_lenght=5, n_trajectories=5, noise_sd=0.05, config=None, transition_matrices=None,
+def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_model=None,
+                   config=None,
+                   transition_matrices=None,
                    observation_parameters=None):
     """
     Run the few data experiment with fixed transition and observation models.
@@ -43,23 +49,29 @@ def run_experiment(trajector_lenght=5, n_trajectories=5, noise_sd=0.05, config=N
     # Collect data with few trials and horizon
 
     original_pomdp, observations, actions, true_states, rewards = generate_pomdp_data(
-        trajectory_length=trajector_lenght, n_trajectories=n_trajectories, seed=SEED, noise_sd=noise_sd,
+        trajectory_length=trajectory_length, n_trajectories=n_trajectories, seed=SEED, noise_sd=noise_sd,
         pomdp=pomdp_with_param
     )
 
-    fuzzy_model = build_fuzzymodel(original_pomdp)
+    # to reuse the fuzzy model if it is already built
+    if fuzzy_model is None:
+        with utils.suppress_output():
+            fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
+        evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
 
     fit_and_performance(
         original_pomdp, observations, actions, config,
         fuzzy_model=fuzzy_model,
-        fix_transitions=transition_matrices,
-        fix_observations=observation_parameters)
+        fix_transitions=transition_matrices if config["fix_transitions"] else None,
+        fix_observations=observation_parameters if config["fix_observations"] else None)
 
-    fit_and_performance(
-        original_pomdp, observations, actions, config,
-        fuzzy_model=None,
-        fix_transitions=transition_matrices,
-        fix_observations=observation_parameters)
+    #fit_and_performance(
+    #    original_pomdp, observations, actions, config,
+    #    fuzzy_model=None,
+    #    fix_transitions=transition_matrices if config["fix_transitions"] else None,
+    #    fix_observations=observation_parameters if config["fix_observations"] else None)
+
+    return fuzzy_model
 
 
 def fit_and_performance(original_pomdp, observations, actions, config, fuzzy_model=None,
@@ -69,36 +81,29 @@ def fit_and_performance(original_pomdp, observations, actions, config, fuzzy_mod
     """
     if fuzzy_model is not None:
         use_fuzzy = True
-        evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model, pomdp=original_pomdp)
-        rho_T = config.get("rho_T", 0.1)
-        rho_O = config.get("rho_O", 0.05)
+        rho_T = config["rho_T"]
+        rho_O = config["rho_O"]
     else:
         rho_T = 0.0
         rho_O = 0.0
         use_fuzzy = False
 
-    fuzzy_pomdp = FuzzyPOMDP(
-        n_states=N_STATES,
-        n_actions=N_ACTION,
-        obs_dim=OBS_DIM,
-        use_fuzzy=use_fuzzy,
-        fuzzy_model=fuzzy_model,
-        rho_T=rho_T,
-        rho_O=rho_O,
-        verbose=False,
-        fix_transitions=fix_transitions,
-        fix_observations=fix_observations
-    )
+    fuzzy_pomdp = FuzzyPOMDP(n_states=N_STATES, n_actions=N_ACTION, obs_dim=OBS_DIM, use_fuzzy=use_fuzzy,
+                             fuzzy_model=fuzzy_model, rho_T=rho_T, rho_O=rho_O, fix_transitions=fix_transitions,
+                             fix_observations=fix_observations,
+                             fixed_observation_states=config["fix_observations_states"])
 
     fuzzy_ll = fuzzy_pomdp.fit(
         observations, actions,
         max_iterations=200,
-        tolerance=1e-8
+        tolerance=1e-5
     )
 
-    print(f"Fuzzy POMDP transitions:\n{fuzzy_pomdp.transitions}")
+    np.set_printoptions(precision=2, formatter={'float': '{: 0.2f}'.format})
+    print(f"Learning POMDP transitions:\n{fuzzy_pomdp.transitions}")
 
-    visualize_observation_distributions(fuzzy_pomdp, N_STATES, title_prefix="Fuzzy")
+    title_prefix = "Fuzzy" if use_fuzzy else "Standard"
+    visualize_observation_distributions(fuzzy_pomdp, N_STATES, title_prefix=title_prefix)
     plt.show()
 
     fuzzy_pomdp.compare_state_transitions(
@@ -115,44 +120,62 @@ def run_set_of_experiments():
     """
     config = utils.get_experiment_config()
 
-    for key, value in config.items():
-        print(f"{key}")
+    for key, value_config in config.items():
+        fuzzy_model_tmp = None
         for data_config in DATA_CONFIG:
-            traj_lenght = 5
+            traj_length = 5
             n_trajectories = 20
             noise_sd = 0.0
 
             if data_config == "NORMAL":
-                traj_lenght = 5
+                traj_length = 5
                 n_trajectories = 20
                 noise_sd = 0.02
             elif data_config == "NOISY":
-                traj_lenght = 5
+                traj_length = 5
                 n_trajectories = 15
                 noise_sd = 0.25
             elif data_config == "FEW_DATA":
-                traj_lenght = 3
+                traj_length = 3
                 n_trajectories = 5
                 noise_sd = 0.02
 
             for parameters_config in PARAMETERS_CONFIG:
-                print(f"Running experiment with {data_config} and {parameters_config}")
-                transition_matrices = None
-                observation_parameters = None
+                print("###")
+                print(f"Running experiment {key} with {data_config} and {parameters_config}")
+                print("###")
+                transition_matrices = value_config["transitions"]
+                observation_parameters = value_config["observations"]
+                value_config["fix_observations_states"] = None
 
                 if parameters_config == "FIXED_TRANSITIONS":
-                    transition_matrices = value["transitions"]
+                    value_config["fix_transitions"] = True
+                    value_config["fix_observations"] = False
+                    value_config["fix_observations_states"] = None
                 elif parameters_config == "FIXED_OBSERVATIONS":
-                    observation_parameters = value["observations"]
-                elif parameters_config == "ZERO_CLUE":
-                    transition_matrices = value["transitions"]
-                    observation_parameters = value["observations"]
+                    value_config["fix_transitions"] = False
+                    value_config["fix_observations"] = True
+                    value_config["fix_observations_states"] = [0, 1, 2]
+                elif parameters_config == "FIXED_OBSERVATIONS_CRITICAL":
+                    value_config["fix_transitions"] = False
+                    value_config["fix_observations"] = True
+                    value_config["fix_observations_states"] = [2]
+                elif parameters_config == "FIXED_OBSERVATIONS_SICK":
+                    value_config["fix_transitions"] = False
+                    value_config["fix_observations"] = True
+                    value_config["fix_observations_states"] = [1]
+                else:
+                    value_config["fix_transitions"] = False
+                    value_config["fix_observations"] = False
+                    value_config["fix_observations_states"] = None
 
-                run_experiment(trajector_lenght=traj_lenght, n_trajectories=n_trajectories,
-                               noise_sd=noise_sd,
-                               config=config,
-                               transition_matrices=transition_matrices,
-                               observation_parameters=observation_parameters)
+                fuzzy_model_tmp = run_experiment(trajectory_length=traj_length,
+                                                 n_trajectories=n_trajectories,
+                                                 noise_sd=noise_sd,
+                                                 config=value_config,
+                                                 fuzzy_model=fuzzy_model_tmp,
+                                                 transition_matrices=transition_matrices,
+                                                 observation_parameters=observation_parameters)
 
 
 if __name__ == "__main__":

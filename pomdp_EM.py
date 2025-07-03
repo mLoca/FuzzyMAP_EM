@@ -141,6 +141,32 @@ class PomdpEM:
 
         return gammas, xis, total_ll
 
+    #e-step with parallelization
+    def expectation_step_parallel(self, observations, actions):
+        """Parallelized E-step using multi-processing"""
+        import multiprocessing as mp
+
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            # Process each observation sequence in parallel
+            results = pool.starmap(
+                self._process_single_sequence,
+                [(obs_seq, act_seq) for obs_seq, act_seq in zip(observations, actions)]
+            )
+
+        # Unpack results
+        gammas, xis, seq_lls = zip(*results)
+        total_ll = sum(seq_lls)
+
+        return list(gammas), list(xis), total_ll
+
+    def _process_single_sequence(self, obs_seq, act_seq):
+        """Process a single observation sequence for parallelization"""
+        alpha, seq_ll = self.forward_pass(obs_seq, act_seq)
+        beta = self.backward_pass(obs_seq, act_seq)
+        gamma = self.compute_posterior(alpha, beta)
+        xi = self.compute_transition_counts(alpha, beta, obs_seq, act_seq)
+        return gamma, xi, seq_ll
+
     def maximization_step(self, observations, actions, gammas, xis):
         """M-step: Update model parameters based on expected sufficient statistics"""
         # Number of sequences
@@ -201,25 +227,28 @@ class PomdpEM:
         """Run EM algorithm to fit the POMDP model parameters"""
         prev_ll = -np.inf
         sleep(1)
+        try:
+            for iteration in range(max_iterations):
+                # E-step
+                gammas, xis, log_likelihood = self.expectation_step_parallel(observations, actions)
 
-        for iteration in range(max_iterations):
-            # E-step
-            gammas, xis, log_likelihood = self.expectation_step(observations, actions)
+                # M-step
+                self.maximization_step(observations, actions, gammas, xis)
 
-            # M-step
-            self.maximization_step(observations, actions, gammas, xis)
+                # Check convergence
+                improvement = log_likelihood - prev_ll
+                prev_ll = log_likelihood
 
-            # Check convergence
-            improvement = log_likelihood - prev_ll
-            prev_ll = log_likelihood
+                if self.verbose:
+                    print(
+                        f"Iteration {iteration + 1}, Log-Likelihood: {log_likelihood:.4f}, Improvement: {improvement:.4f}")
 
-            if self.verbose:
-                print(
-                    f"Iteration {iteration + 1}, Log-Likelihood: {log_likelihood:.4f}, Improvement: {improvement:.4f}")
-
-            if np.abs(improvement) < tolerance:
-                print(f"Converged after {iteration + 1} iterations")
-                break
+                if np.abs(improvement) < tolerance:
+                    print(f"Converged after {iteration + 1} iterations")
+                    break
+        except ValueError as e:
+            print(f"An error occurred during EM fitting: {e}")
+            return None
 
         return log_likelihood
 

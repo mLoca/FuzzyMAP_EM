@@ -1,4 +1,7 @@
 import json
+import os
+import sys
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -75,3 +78,21 @@ def from_beta_to_multivariate_normal(beta):
         "means": means,
         "covariances": covariances
     }
+
+
+@contextmanager
+def suppress_output():
+    """
+    Context manager to temporarily suppress stdout output.
+    """
+    # Save the original stdout
+    original_stdout = sys.stdout
+    # Redirect stdout to devnull
+    sys.stdout = open(os.devnull, 'w')
+
+    try:
+        yield
+    finally:
+        # Restore stdout
+        sys.stdout.close()
+        sys.stdout = original_stdout
