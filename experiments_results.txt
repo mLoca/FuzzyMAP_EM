@@ -1,0 +1,906 @@
+/home/loca/PycharmProjects/POMDP-Fuzzy/.venv/bin/python /home/loca/PycharmProjects/testPOMDPEM/experiments.py
+###
+Running experiment first_experiment with NOISY and FIXED_TRANSITIONS
+###
+Generating training data...
+Generated 30 trajectories of length 5
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: 0.2905
+Symptoms R²: -1.3549
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: 0.3391
+Symptoms R²: -4.7180
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: -6.5807
+Symptoms R²: -1.5320
+
+--- Detailed Next Observation Predictions ---
+Transition healthy -> healthy:
+  Count: 1439
+  Test Result R²: 0.2859
+  Symptoms R²: -1.2761
+Transition healthy -> sick:
+  Count: 248
+  Test Result R²: 0.3594
+  Symptoms R²: -4.8695
+Transition healthy -> critical:
+  Count: 49
+  Test Result R²: -11.3325
+  Symptoms R²: -2.1889
+Transition sick -> healthy:
+  Count: 394
+  Test Result R²: 0.2967
+  Symptoms R²: -1.6245
+Transition sick -> sick:
+  Count: 364
+  Test Result R²: 0.3676
+  Symptoms R²: -4.5689
+Transition sick -> critical:
+  Count: 35
+  Test Result R²: -6.6299
+  Symptoms R²: -0.9156
+Transition critical -> healthy:
+  Count: 20
+  Test Result R²: 0.3531
+  Symptoms R²: -4.1808
+Transition critical -> sick:
+  Count: 156
+  Test Result R²: 0.2234
+  Symptoms R²: -4.8878
+Transition critical -> critical:
+  Count: 295
+  Test Result R²: -6.0087
+  Symptoms R²: -1.5198
+general r2 scores:
+Test Result R²: 0.5258
+Symptoms R²: 0.6169
+Converged after 75 iterations
+Learning POMDP transitions:
+[[[ 0.85  0.14  0.01]
+  [ 0.80  0.15  0.05]]
+
+ [[ 0.30  0.60  0.10]
+  [ 0.65  0.35  0.00]]
+
+ [[ 0.01  0.05  0.94]
+  [ 0.10  0.65  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.0000
+KL Divergences for healthy: 0.2167
+KL Divergences for sick: 0.2005
+KL Divergences for critical: 1.0363
+Converged after 97 iterations
+Learning POMDP transitions:
+[[[ 0.85  0.14  0.01]
+  [ 0.80  0.15  0.05]]
+
+ [[ 0.30  0.60  0.10]
+  [ 0.65  0.35  0.00]]
+
+ [[ 0.01  0.05  0.94]
+  [ 0.10  0.65  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.0000
+KL Divergences for healthy: 0.2167
+KL Divergences for sick: 0.8723
+KL Divergences for critical: 1.3425
+###
+Running experiment first_experiment with NOISY and FIXED_OBSERVATIONS
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 63 iterations
+Learning POMDP transitions:
+[[[ 0.82  0.15  0.02]
+  [ 0.73  0.27  0.00]]
+
+ [[ 0.44  0.45  0.11]
+  [ 0.46  0.44  0.10]]
+
+ [[ 0.00  0.37  0.63]
+  [ 0.04  0.89  0.07]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1158
+KL Divergences for healthy: 0.0000
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.0000
+Converged after 18 iterations
+Learning POMDP transitions:
+[[[ 0.80  0.17  0.03]
+  [ 0.68  0.32  0.00]]
+
+ [[ 0.49  0.35  0.16]
+  [ 0.50  0.39  0.11]]
+
+ [[ 0.00  0.34  0.66]
+  [ 0.21  0.79  0.00]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1285
+KL Divergences for healthy: 0.0000
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.0000
+###
+Running experiment first_experiment with NOISY and ZERO_CLUE
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 104 iterations
+Learning POMDP transitions:
+[[[ 0.89  0.11  0.00]
+  [ 0.15  0.51  0.34]]
+
+ [[ 0.11  0.21  0.67]
+  [ 0.32  0.33  0.34]]
+
+ [[ 0.10  0.07  0.83]
+  [ 0.01  0.27  0.72]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.1356
+KL Divergences for healthy: 0.2234
+KL Divergences for sick: 0.2258
+KL Divergences for critical: 1.0860
+Learning POMDP transitions:
+[[[ 1.00  0.00  0.00]
+  [ 0.36  0.27  0.37]]
+
+ [[ 0.00  0.19  0.81]
+  [ 0.00  0.47  0.53]]
+
+ [[ 0.15  0.04  0.81]
+  [ 0.00  0.32  0.68]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.1532
+KL Divergences for healthy: 0.2077
+KL Divergences for sick: 0.9343
+KL Divergences for critical: 1.0907
+###
+Running experiment first_experiment with NOISY and FIXED_OBSERVATIONS_CRITICAL
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 61 iterations
+Learning POMDP transitions:
+[[[ 0.83  0.17  0.00]
+  [ 0.71  0.29  0.00]]
+
+ [[ 0.42  0.40  0.17]
+  [ 0.40  0.51  0.10]]
+
+ [[ 0.00  0.30  0.70]
+  [ 0.20  0.73  0.07]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1165
+KL Divergences for healthy: 0.2195
+KL Divergences for sick: 0.2630
+KL Divergences for critical: 0.0000
+Converged after 40 iterations
+Learning POMDP transitions:
+[[[ 0.82  0.18  0.00]
+  [ 0.68  0.32  0.00]]
+
+ [[ 0.46  0.33  0.21]
+  [ 0.48  0.41  0.11]]
+
+ [[ 0.00  0.31  0.69]
+  [ 0.26  0.74  0.00]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1294
+KL Divergences for healthy: 0.2147
+KL Divergences for sick: 0.1433
+KL Divergences for critical: 0.0000
+###
+Running experiment first_experiment with NOISY and FIXED_OBSERVATIONS_SICK
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 79 iterations
+Learning POMDP transitions:
+[[[ 0.76  0.24  0.00]
+  [ 0.37  0.52  0.11]]
+
+ [[ 0.10  0.30  0.60]
+  [ 0.14  0.37  0.50]]
+
+ [[ 0.13  0.05  0.82]
+  [ 0.01  0.28  0.72]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.1124
+KL Divergences for healthy: 0.2188
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 1.1238
+Converged after 54 iterations
+Learning POMDP transitions:
+[[[ 1.00  0.00  0.00]
+  [ 0.32  0.39  0.29]]
+
+ [[ 0.00  0.19  0.81]
+  [ 0.12  0.29  0.59]]
+
+ [[ 0.14  0.05  0.81]
+  [ 0.00  0.32  0.68]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.1383
+KL Divergences for healthy: 0.2098
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 1.0479
+###
+Running experiment second_experiment with NOISY and FIXED_TRANSITIONS
+###
+Generating training data...
+Generated 30 trajectories of length 5
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: 0.0763
+Symptoms R²: 0.0877
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: 0.2015
+Symptoms R²: 0.0589
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: -10.9626
+Symptoms R²: -0.2315
+
+--- Detailed Next Observation Predictions ---
+Transition healthy -> healthy:
+  Count: 1439
+  Test Result R²: 0.0761
+  Symptoms R²: 0.0870
+Transition healthy -> sick:
+  Count: 248
+  Test Result R²: 0.2248
+  Symptoms R²: 0.0555
+Transition healthy -> critical:
+  Count: 49
+  Test Result R²: -11.4536
+  Symptoms R²: -0.6623
+Transition sick -> healthy:
+  Count: 394
+  Test Result R²: 0.0878
+  Symptoms R²: 0.0864
+Transition sick -> sick:
+  Count: 364
+  Test Result R²: 0.2517
+  Symptoms R²: 0.0598
+Transition sick -> critical:
+  Count: 35
+  Test Result R²: -8.2527
+  Symptoms R²: 0.0547
+Transition critical -> healthy:
+  Count: 20
+  Test Result R²: -0.3727
+  Symptoms R²: -0.0689
+Transition critical -> sick:
+  Count: 156
+  Test Result R²: 0.0125
+  Symptoms R²: 0.0393
+Transition critical -> critical:
+  Count: 295
+  Test Result R²: -11.2851
+  Symptoms R²: -0.2073
+general r2 scores:
+Test Result R²: 0.5708
+Symptoms R²: 0.1134
+Converged after 89 iterations
+Learning POMDP transitions:
+[[[ 0.85  0.14  0.01]
+  [ 0.80  0.15  0.05]]
+
+ [[ 0.30  0.60  0.10]
+  [ 0.65  0.35  0.00]]
+
+ [[ 0.01  0.05  0.94]
+  [ 0.10  0.65  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.0000
+KL Divergences for healthy: 0.3380
+KL Divergences for sick: 0.7889
+KL Divergences for critical: 14.0534
+Converged after 55 iterations
+Learning POMDP transitions:
+[[[ 0.85  0.14  0.01]
+  [ 0.80  0.15  0.05]]
+
+ [[ 0.30  0.60  0.10]
+  [ 0.65  0.35  0.00]]
+
+ [[ 0.01  0.05  0.94]
+  [ 0.10  0.65  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2):
+Invalid input. Please enter a number.
+Enter the number for the state sick (0-2): 2
+Enter the number for the state critical (0-2): 1
+L1 distance for transitions: 0.2456
+KL Divergences for healthy: 0.1221
+KL Divergences for sick: 2.5092
+KL Divergences for critical: 0.9578
+###
+Running experiment second_experiment with NOISY and FIXED_OBSERVATIONS
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 51 iterations
+Learning POMDP transitions:
+[[[ 0.67  0.30  0.03]
+  [ 0.62  0.29  0.09]]
+
+ [[ 0.42  0.53  0.05]
+  [ 0.62  0.35  0.03]]
+
+ [[ 0.28  0.17  0.54]
+  [ 0.11  0.70  0.20]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1075
+KL Divergences for healthy: 0.0000
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.0000
+Converged after 162 iterations
+Learning POMDP transitions:
+[[[ 0.62  0.33  0.05]
+  [ 0.56  0.35  0.09]]
+
+ [[ 0.64  0.27  0.09]
+  [ 0.90  0.00  0.10]]
+
+ [[ 0.41  0.13  0.46]
+  [ 0.42  0.58  0.00]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.2178
+KL Divergences for healthy: 0.0000
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.0000
+###
+Running experiment second_experiment with NOISY and ZERO_CLUE
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 168 iterations
+Learning POMDP transitions:
+[[[ 0.50  0.42  0.09]
+  [ 0.18  0.82  0.00]]
+
+ [[ 0.10  0.80  0.10]
+  [ 0.15  0.75  0.10]]
+
+ [[ 0.18  0.58  0.24]
+  [ 0.01  0.22  0.77]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.2266
+KL Divergences for healthy: 6.8494
+KL Divergences for sick: 1.5141
+KL Divergences for critical: 0.6493
+Converged after 56 iterations
+Learning POMDP transitions:
+[[[ 0.42  0.09  0.49]
+  [ 0.00  1.00  0.00]]
+
+ [[ 0.00  0.46  0.54]
+  [ 0.22  0.26  0.51]]
+
+ [[ 0.16  0.49  0.35]
+  [ 0.04  0.44  0.51]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.2368
+KL Divergences for healthy: 0.3138
+KL Divergences for sick: 1.6448
+KL Divergences for critical: 0.2385
+###
+Running experiment second_experiment with NOISY and FIXED_OBSERVATIONS_CRITICAL
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Learning POMDP transitions:
+[[[ 0.42  0.54  0.04]
+  [ 0.39  0.61  0.00]]
+
+ [[ 0.25  0.74  0.01]
+  [ 0.21  0.72  0.07]]
+
+ [[ 0.18  0.21  0.61]
+  [ 0.20  0.55  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.2106
+KL Divergences for healthy: 2.4490
+KL Divergences for sick: 1.7884
+KL Divergences for critical: 0.0000
+Converged after 52 iterations
+Learning POMDP transitions:
+[[[ 0.29  0.53  0.17]
+  [ 0.51  0.49  0.00]]
+
+ [[ 0.51  0.49  0.00]
+  [ 0.41  0.36  0.22]]
+
+ [[ 0.41  0.21  0.38]
+  [ 0.00  1.00  0.00]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2):
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.2833
+KL Divergences for healthy: 22.6313
+KL Divergences for sick: 1.5113
+KL Divergences for critical: 0.0000
+###
+Running experiment second_experiment with NOISY and FIXED_OBSERVATIONS_SICK
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 83 iterations
+Learning POMDP transitions:
+[[[ 0.62  0.15  0.23]
+  [ 0.06  0.38  0.57]]
+
+ [[ 0.08  0.40  0.52]
+  [ 0.21  0.54  0.25]]
+
+ [[ 0.01  0.33  0.66]
+  [ 0.12  0.12  0.76]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.1859
+KL Divergences for healthy: 0.0723
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.7903
+Converged after 108 iterations
+Learning POMDP transitions:
+[[[ 0.68  0.00  0.32]
+  [ 0.00  0.41  0.59]]
+
+ [[ 0.00  0.00  1.00]
+  [ 1.00  0.00  0.00]]
+
+ [[ 0.00  0.33  0.67]
+  [ 0.10  0.00  0.90]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.3163
+KL Divergences for healthy: 0.0785
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.7203
+###
+Running experiment third_experiment with NOISY and FIXED_TRANSITIONS
+###
+Generating training data...
+Generated 30 trajectories of length 5
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: 0.1605
+Symptoms R²: -0.3153
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: 0.2601
+Symptoms R²: -1.6178
+
+--- Fuzzy Reward & Observation Prediction Performance ---
+Total steps: 3000
+Test Result R²: -3.5924
+Symptoms R²: -0.4858
+
+--- Detailed Next Observation Predictions ---
+Transition healthy -> healthy:
+  Count: 1439
+  Test Result R²: 0.1609
+  Symptoms R²: -0.2822
+Transition healthy -> sick:
+  Count: 248
+  Test Result R²: 0.2313
+  Symptoms R²: -1.6624
+Transition healthy -> critical:
+  Count: 49
+  Test Result R²: -11.2138
+  Symptoms R²: -1.0537
+Transition sick -> healthy:
+  Count: 394
+  Test Result R²: 0.1520
+  Symptoms R²: -0.4120
+Transition sick -> sick:
+  Count: 364
+  Test Result R²: 0.3071
+  Symptoms R²: -1.6231
+Transition sick -> critical:
+  Count: 35
+  Test Result R²: -3.8613
+  Symptoms R²: -0.0539
+Transition critical -> healthy:
+  Count: 20
+  Test Result R²: 0.2207
+  Symptoms R²: -2.2629
+Transition critical -> sick:
+  Count: 156
+  Test Result R²: 0.1702
+  Symptoms R²: -1.6126
+Transition critical -> critical:
+  Count: 295
+  Test Result R²: -2.9795
+  Symptoms R²: -0.4775
+general r2 scores:
+Test Result R²: 0.4544
+Symptoms R²: 0.5413
+Converged after 47 iterations
+Learning POMDP transitions:
+[[[ 0.85  0.14  0.01]
+  [ 0.80  0.15  0.05]]
+
+ [[ 0.30  0.60  0.10]
+  [ 0.65  0.35  0.00]]
+
+ [[ 0.01  0.05  0.94]
+  [ 0.10  0.65  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.0000
+KL Divergences for healthy: 0.9603
+KL Divergences for sick: 7.2332
+KL Divergences for critical: 0.5957
+Converged after 49 iterations
+Learning POMDP transitions:
+[[[ 0.85  0.14  0.01]
+  [ 0.80  0.15  0.05]]
+
+ [[ 0.30  0.60  0.10]
+  [ 0.65  0.35  0.00]]
+
+ [[ 0.01  0.05  0.94]
+  [ 0.10  0.65  0.25]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.0000
+KL Divergences for healthy: 1.0059
+KL Divergences for sick: 8.9671
+KL Divergences for critical: 0.6432
+###
+Running experiment third_experiment with NOISY and FIXED_OBSERVATIONS
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 43 iterations
+Learning POMDP transitions:
+[[[ 0.81  0.10  0.08]
+  [ 0.70  0.30  0.00]]
+
+ [[ 0.54  0.35  0.11]
+  [ 0.33  0.56  0.11]]
+
+ [[ 0.00  0.58  0.42]
+  [ 0.20  0.43  0.37]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1719
+KL Divergences for healthy: 0.0000
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.0000
+Converged after 40 iterations
+Learning POMDP transitions:
+[[[ 0.81  0.10  0.10]
+  [ 0.64  0.36  0.00]]
+
+ [[ 0.65  0.18  0.18]
+  [ 0.39  0.49  0.12]]
+
+ [[ 0.00  0.70  0.30]
+  [ 0.43  0.12  0.45]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.2403
+KL Divergences for healthy: 0.0000
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.0000
+###
+Running experiment third_experiment with NOISY and ZERO_CLUE
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 126 iterations
+Learning POMDP transitions:
+[[[ 0.71  0.19  0.09]
+  [ 0.30  0.55  0.15]]
+
+ [[ 0.21  0.10  0.69]
+  [ 0.59  0.29  0.12]]
+
+ [[ 0.39  0.05  0.56]
+  [ 0.16  0.22  0.62]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.2190
+KL Divergences for healthy: 0.9297
+KL Divergences for sick: 3.8017
+KL Divergences for critical: 0.9686
+Converged after 107 iterations
+Learning POMDP transitions:
+[[[ 1.00  0.00  0.00]
+  [ 0.00  0.76  0.24]]
+
+ [[ 0.14  0.00  0.86]
+  [ 0.92  0.00  0.08]]
+
+ [[ 0.10  0.39  0.51]
+  [ 0.00  0.36  0.64]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.2645
+KL Divergences for healthy: 0.1867
+KL Divergences for sick: 0.6105
+KL Divergences for critical: 0.8345
+###
+Running experiment third_experiment with NOISY and FIXED_OBSERVATIONS_CRITICAL
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 152 iterations
+Learning POMDP transitions:
+[[[ 0.55  0.42  0.04]
+  [ 0.61  0.39  0.00]]
+
+ [[ 0.39  0.51  0.11]
+  [ 0.15  0.75  0.11]]
+
+ [[ 0.00  0.41  0.59]
+  [ 0.13  0.50  0.37]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.1837
+KL Divergences for healthy: 1.0405
+KL Divergences for sick: 0.5235
+KL Divergences for critical: 0.0000
+Converged after 105 iterations
+Learning POMDP transitions:
+[[[ 0.72  0.17  0.11]
+  [ 0.65  0.31  0.04]]
+
+ [[ 0.77  0.04  0.19]
+  [ 0.18  0.65  0.17]]
+
+ [[ 0.00  0.54  0.46]
+  [ 0.22  0.49  0.29]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 0
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 2
+L1 distance for transitions: 0.2193
+KL Divergences for healthy: 0.2139
+KL Divergences for sick: 1.1393
+KL Divergences for critical: 0.0000
+###
+Running experiment third_experiment with NOISY and FIXED_OBSERVATIONS_SICK
+###
+Generating training data...
+Generated 30 trajectories of length 5
+Converged after 49 iterations
+Learning POMDP transitions:
+[[[ 0.48  0.12  0.41]
+  [ 0.37  0.40  0.24]]
+
+ [[ 0.15  0.65  0.21]
+  [ 0.05  0.62  0.33]]
+
+ [[ 0.42  0.15  0.42]
+  [ 0.14  0.22  0.64]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.1910
+KL Divergences for healthy: 0.1918
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 4.7278
+Converged after 143 iterations
+Learning POMDP transitions:
+[[[ 0.40  0.35  0.25]
+  [ 0.62  0.00  0.38]]
+
+ [[ 0.12  0.33  0.55]
+  [ 0.00  0.53  0.47]]
+
+ [[ 0.26  0.00  0.74]
+  [ 0.04  0.39  0.57]]]
+
+Select a state to compare transition probabilities:
+0: healthy
+1: sick
+2: critical
+Enter the number for the state healthy (0-2): 2
+Enter the number for the state sick (0-2): 1
+Enter the number for the state critical (0-2): 0
+L1 distance for transitions: 0.2368
+KL Divergences for healthy: 0.0945
+KL Divergences for sick: 0.0000
+KL Divergences for critical: 0.6346
+
+Process finished with exit code 0
