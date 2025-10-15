@@ -36,7 +36,7 @@ class PomdpEM:
         self.initial_prob = np.ones(n_states) / n_states  # P(s_0)
 
         # Observation model parameters (Gaussian for each state)
-        np.random.seed(15)
+        #np.random.seed(15)
         self.obs_means = np.random.normal(loc=np.abs(np.random.randn(1)), scale=0.1, size=(n_states, obs_dim))
         self.obs_covs = np.array([np.eye(obs_dim) for _ in range(n_states)])
 

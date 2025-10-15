@@ -57,9 +57,9 @@ def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_m
     # to reuse the fuzzy model if it is already built
     if fuzzy_model is None:
         with utils.suppress_output():
-            fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
-            #fuzzy_model = create_fuzzy_model()
-        evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
+            #fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
+            fuzzy_model = create_fuzzy_model()
+        evaluate_fuzzy_reward_prediction(600, 5, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
         original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
 
     fit_and_performance(
@@ -147,8 +147,8 @@ def run_set_of_experiments():
                 noise_sd = 0.02
             elif data_config == "NOISY":
                 traj_length = 5
-                n_trajectories = 30
-                noise_sd = 0.15
+                n_trajectories = 11
+                noise_sd = 0.01
             elif data_config == "FEW_DATA":
                 traj_length = 3
                 n_trajectories = 5

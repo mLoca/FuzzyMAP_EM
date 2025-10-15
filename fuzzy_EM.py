@@ -1,4 +1,5 @@
 import random
+from asyncio import sleep
 
 import matplotlib.pyplot as plt
 import numpy as np
