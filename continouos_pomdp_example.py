@@ -1,28 +1,36 @@
 import random
 
 import pomdp_py
-from pomdp_py import ObservationModel, Agent, Environment, POMDP, vi_pruning
+from pomdp_py import ObservationModel, Agent, Environment, POMDP
 import numpy as np
-from scipy.stats import beta
-from sklearn.metrics import r2_score
+from scipy.stats import beta, norm, uniform
 import pandas as pd
 
 import seaborn as sns
 
 import matplotlib.pyplot as plt
 
-from pomdp_example import State, MedAction, MedicalTransitionModel, MedicalRewardModel, Observation, \
+from pomdp_example import State, MedAction, MedicalTransitionModel, MedicalRewardModel, \
     MedicalPolicyModel
 
 STATES = [State(s) for s in ["healthy", "sick", "critical"]]
 ACTIONS = [MedAction(a) for a in ["wait", "treat"]]
 DEFAULT_OBS_PARAMS = {
     # Sano: Test per lo più negativo, sintomi per lo più assenti
-    "healthy": (1.8, 7.5, 2, 10),
+    "healthy":{
+        "test":(1.8, 7.5),
+        "symptoms":(2, 10),
+    },
     # Malato: Test misto ma per lo più negativo, sintomi per lo più presenti
-    "sick": (2.5, 4.5, 4, 4.5),
+    "sick": {
+        "test":(2.5, 4.5),
+        "symptoms":(4, 4.5),
+    },
     # Critico: Test per lo più positivo, sintomi fortemente presenti
-    "critical": (9, 2, 8.9, 2.5)
+    "critical": {
+        "test":(9, 2,),
+        "symptoms":(8.9, 2.5),
+    }
 }
 DEFAULT_TRANS_PARAMS = {
     # Wait action transitions
@@ -50,60 +58,110 @@ DEFAULT_TRANS_PARAMS = {
 
 
 class ContinuousObservationModel(ObservationModel):
-    def __init__(self, states, actions, obs_params=None, *args, **kwargs):
+    _DIST_MAP = ["beta", "norm", "uniform"]
+
+    def __init__(self, states, actions, obs_params=None, dist_name="beta", *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.states = states
         self.actions = actions
-        # define Beta distribution parameters per state
+
+        if dist_name not in self._DIST_MAP:
+            raise ValueError(f"Unsupported distribution type: {dist_name}. "
+                             f"Supported types are: {self._DIST_MAP}")
+        self.dist_name = dist_name
+        # define  distribution parameters per state
         # format: { state_name: (alpha_test, beta_test, alpha_symp, beta_symp) }
         if obs_params is None:
             self.params = DEFAULT_OBS_PARAMS
         else:
+            for state in states:
+                if state.name not in obs_params:
+                    raise ValueError(f"Observation parameters missing for state: {state.name}")
+                for dim, p in obs_params[state.name].items():
+                    if len(p) != 2:
+                        raise ValueError(f"Beta distribution requires 2 parameters for {dim} in state {state.name}")
+
             self.params = obs_params
 
+        #TODO: check the dimension of obs_params for each state
+
     def sample(self, next_state, action, **kwargs):
-        a_t, b_t, a_s, b_s = self.params[next_state.name]
-        test_obs = beta.rvs(a_t, b_t)
-        symp_obs = beta.rvs(a_s, b_s)
-        return np.array([test_obs, symp_obs])
+        dims = self.params[next_state.name]
+        samples = []
+        for _, p in dims:
+            if self.dist_name == "beta":
+                a, b = p
+                samples.append(beta.rvs(a, b))
+            elif self.dist_name == "norm":
+                loc, scale = p
+                samples.append(norm.rvs(loc=loc, scale=scale))
+            elif self.dist_name == "uniform":
+                low, high = p
+                samples.append(uniform.rvs(loc=low, scale=(high - low)))
+            else:
+                raise ValueError(f"Distribuzione non supportata: {self.dist_name}")
+        return np.asarray(samples)
 
     def probability(self, observation, next_state, action):
-        a_t, b_t, a_s, b_s = self.params[next_state.name]
-        test_obs, symp_obs = observation
-        p_t = beta.pdf(test_obs, a_t, b_t)
-        p_s = beta.pdf(symp_obs, a_s, b_s)
-        return p_t * p_s
+        obs = np.asarray(observation)
+        dims = self.params[next_state.name]
+        prob = 1.0
+        for i, (_, p) in enumerate(dims):
+            x = obs[i]
+            if self.dist_name == "beta":
+                a, b = p
+                prob *= beta.pdf(x, a, b)
+            elif self.dist_name == "norm":
+                loc, scale = p
+                prob *= norm.pdf(x, loc=loc, scale=scale)
+            elif self.dist_name == "uniform":
+                low, high = p
+                prob *= uniform.pdf(x, loc=low, scale=(high - low))
+            else:
+                raise ValueError(f"Distribuzione non supportata: {self.dist_name}")
+        return prob
 
+    #TODO: move to a file responsible to plotting
+    #TODO: make it general
     def plot_observation_distribution(self):
         # Plot the observation distribution for each state
         # Create a grid of subplots (2 rows: tests and symptoms, 3 columns: states)
-        fig, axs = plt.subplots(2, 3, figsize=(15, 10))
+        fig, axs = plt.subplots(len(self.params[self.states[0].name]), len(self.states), figsize=(15, 10))
         plt.suptitle("Observation Distribution for Each State", fontsize=16)
         plt.subplots_adjust(wspace=0.4, hspace=0.4)
 
         # Loop through each state and plot the distributions
-        colors = ['green', 'blue', 'red']
+        cmap = self._get_colors()
+        colors = [cmap(i / max(1, len(self.states) - 1)) for i in range(len(self.states))]
+
         for col, state in enumerate(self.states):
-            state_name = state.name
-            a_t, b_t, a_s, b_s = self.params[state_name]
-
-            # Data for plotting
-            x_test = np.linspace(0, 1, 100)
-            x_symp = np.linspace(0, 1, 100)
-            y_test = beta.pdf(x_test, a_t, b_t)
-            y_symp = beta.pdf(x_symp, a_s, b_s)
-
-            # Plot test results distribution (first row)
-            axs[0, col].plot(x_test, y_test, color=colors[col])
             axs[0, col].set_title(f"{state_name}")
-            axs[0, col].set_xlabel("Test Result")
-            axs[0, col].set_ylabel("Density")
 
-            # Plot symptoms distribution (second row)
-            axs[1, col].plot(x_symp, y_symp, color=colors[col])
-            axs[1, col].set_xlabel("Symptoms")
-            axs[1, col].set_ylabel("Density")
+            state_name = state.name
+            index = 0
+            for dim, p in self.params[state_name]:
+                _obs_x = np.linspace(-5, 5, 5000)
+                _obs_y = None
+                if self.dist_name == "beta":
+                    a, b = p
+                    _obs_y = beta.pdf(_obs_x, a, b)
+                elif self.dist_name == "norm":
+                    loc, scale = p
+                    _obs_y = norm.pdf(_obs_x, loc, scale)
+                elif self.dist_name == "uniform":
+                    low, high = p
+                    _obs_y = uniform.pdf(_obs_x, low, high)
+
+                # Plot test results distribution (first row)
+                axs[index, col].plot(_obs_x, _obs_y, color=colors[col])
+                axs[index, col].set_title(f"{state_name}")
+                axs[index, col].set_xlabel(dim)
+                axs[index, col].set_ylabel("Density")
+
+                index += 1
+
+                # Plot symptoms distribution (second row)
 
         plt.tight_layout()
         plt.show()
@@ -114,57 +172,70 @@ class ContinuousObservationModel(ObservationModel):
         plt.plot(x_test, y_test, label='Test Result', color='blue')
         plt.savefig("sick_test_distribution.png")
 
-    def plot_observation_distributions_2_axes(self):
+    def _get_colors(self):
+        num_states = len(self.states)
+        if num_states <= 10:
+            cmap = plt.get_cmap('tab10')
+        elif num_states <= 20:
+            cmap = plt.get_cmap('tab20')
+        else:
+            cmap = plt.get_cmap('viridis')
+        return cmap
+
+    def plot_observation_distributions_2_axes(self, obs_names):
         """
         Plot 2D joint probability density functions for test results and symptoms
         for each state using contour plots.
+
+        obs_names: List of observation names to plot (e.g., ["test", "symptoms"]). HAS TO BE A 2D OBSERVATION
         """
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        for obs_name in obs_names:
+            if obs_name not in self.params[self.states[0].name]:
+                raise ValueError(f"Unsupported observation name: {obs_name}. "
+                                 f"Supported names are: {self.params[self.states[0].name].keys()}")
+        fig, axes = plt.subplots(1, len(self.params[self.states[0].name].keys()), figsize=(18, 6))
         state_names = ["healthy", "sick", "critical"]
 
         # Create meshgrid for evaluation
-        test_vals = np.linspace(0, 1, 100)
-        symp_vals = np.linspace(0, 1, 100)
-        T, S = np.meshgrid(test_vals, symp_vals)
+        _obs_x0 = np.linspace(0, 1, 100)
+        _obs_x1 = np.linspace(0, 1, 100)
+        X0, X1 = np.meshgrid(_obs_x0, _obs_x1)
 
+        joint_pdf = 1
         for i, state_name in enumerate(state_names):
-            a_t, b_t, a_s, b_s = self.params[state_name]
+            for dim, p in self.params[state_name]:
+                if dim == obs_names[0] or dim == obs_names[1]:
+                    if dim == obs_names[0]:
+                        _obs_X = X0
+                    else:
+                        _obs_X = X1
 
-            # Calculate joint PDF (product of individual PDFs)
-            test_pdf = beta.pdf(T, a_t, b_t)
-            symp_pdf = beta.pdf(S, a_s, b_s)
-            joint_pdf = test_pdf * symp_pdf
+                    if self.dist_name == "beta":
+                        a, b = p
+                        _obs_y = beta.pdf(_obs_X, a, b)
+                    elif self.dist_name == "norm":
+                        loc, scale = p
+                        _obs_y = norm.pdf(_obs_X, loc, scale)
+                    elif self.dist_name == "uniform":
+                        low, high = p
+                        _obs_y = uniform.pdf(_obs_X, low, high)
+
+            joint_pdf *= _obs_y
 
             # Create contour plot
-            im = axes[i].contourf(T, S, joint_pdf, levels=20, cmap='viridis')
-            axes[i].set_title(f"Fuzzy State {i + 1}")
-            axes[i].set_xlabel("Test Result")
-            axes[i].set_ylabel("Symptoms")
+            im = axes[i].contourf(X0, X1, joint_pdf, levels=20, cmap='viridis')
+            axes[i].set_title(f"State {state_name}")
+            axes[i].set_xlabel(obs_names[0])
+            axes[i].set_ylabel(obs_names[1])
 
             # Add colorbar
             cbar = fig.colorbar(im, ax=axes[i], pad=0.01)
 
         plt.tight_layout()
         plt.show()
-    def plot_observation_distributions(self):
-        fig, ax = plt.subplots(figsize=(10, 6))
-        for state in self.states:
-            a_t, b_t, a_s, b_s = self.params[state.name]
-            x_test = np.linspace(0, 1, 100)
-            y_test = beta.pdf(x_test, a_t, b_t)
-            ax.plot(x_test, y_test, label=f"{state.name} - Test Result")
 
-            x_symp = np.linspace(0, 1, 100)
-            y_symp = beta.pdf(x_symp, a_s, b_s)
-            ax.plot(x_symp, y_symp, linestyle='--', label=f"{state.name} - Symptoms")
-
-        ax.set_title("Observation Distribution")
-        ax.set_xlabel("Value")
-        ax.set_ylabel("Density")
-        ax.legend()
-        plt.show()
-
-def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd = 0.01, seed=None , pomdp=None):
+#TODO: change the socpe
+def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd=0.01, seed=None, pomdp=None):
     """Generate  data from POMDP model"""
     if seed is not None:
         random.seed(seed)
@@ -250,6 +321,7 @@ def create_continuous_medical_pomdp(init_state=None, trans_params=None, obs_para
                       reward_model=reward_model)
     return POMDP(agent, env)
 
+
 def reset_pomdp(pomdp):
     """
     Create a new POMDP instance from an existing one.
@@ -268,6 +340,7 @@ def reset_pomdp(pomdp):
         agent=pomdp.agent,
         env=pomdp.env
     )
+
 
 def plot_observation_distribution(n_samples=5000):
     # Instantiate the continuous observation model

@@ -8,11 +8,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 import utils
-from fuzzy_EM import FuzzyPOMDP, evaluate_fuzzy_reward_prediction, \
+from models.trainable.fuzzy_EM import FuzzyPOMDP, evaluate_fuzzy_reward_prediction, \
     visualize_observation_distributions
-from fuzzy_model import build_fuzzymodel
-from fuzzy_model import create_continuous_medical_pomdp
-from fuzzy_model import collect_data
+from fuzzy.fuzzy_model import create_continuous_medical_pomdp
 
 from continouos_pomdp_example import STATES, generate_pomdp_data
 from mat_fuzzy_model import create_fuzzy_model
@@ -60,21 +58,21 @@ def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_m
             #fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
             fuzzy_model = create_fuzzy_model()
         evaluate_fuzzy_reward_prediction(600, 5, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
-        original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
+        #original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
 
-    fit_and_performance(
-        original_pomdp, observations, actions, config,
-        fuzzy_model=fuzzy_model,
-        fix_transitions=transition_matrices if config["fix_transitions"] else None,
-        fix_observations=observation_parameters if config["fix_observations"] else None,
-        fig_string=fig_string+"_Fuzzy.png")
-
-    fit_and_performance(
-        original_pomdp, observations, actions, config,
-        fuzzy_model=None,
-        fix_transitions=transition_matrices if config["fix_transitions"] else None,
-        fix_observations=observation_parameters if config["fix_observations"] else None,
-        fig_string=fig_string+"_Standard.png")
+    #fit_and_performance(
+    #    original_pomdp, observations, actions, config,
+    #    fuzzy_model=fuzzy_model,
+    #    fix_transitions=transition_matrices if config["fix_transitions"] else None,
+    #    fix_observations=observation_parameters if config["fix_observations"] else None,
+    #    fig_string=fig_string+"_Fuzzy.png")
+#
+    #fit_and_performance(
+    #    original_pomdp, observations, actions, config,
+    #    fuzzy_model=None,
+    #    fix_transitions=transition_matrices if config["fix_transitions"] else None,
+    #    fix_observations=observation_parameters if config["fix_observations"] else None,
+    #    fig_string=fig_string+"_Standard.png")
 
     return fuzzy_model
 

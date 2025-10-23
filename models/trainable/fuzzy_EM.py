@@ -1,16 +1,17 @@
 import random
-from asyncio import sleep
 
 import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 import numpy as np
 from scipy.stats import norm
 from sklearn.metrics import r2_score, root_mean_squared_error
 
-import utils
+from utils import utils
 from continouos_pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
 from continouos_pomdp_example import (generate_pomdp_data,
                                       STATES, ACTIONS, ContinuousObservationModel)
-from fuzzy_model import build_fuzzymodel
+from fuzzy.fuzzy_model import build_fuzzymodel
 from pomdp_EM import PomdpEM
 
 DEFAULT_PARAMS_TRANS = [
@@ -29,7 +30,7 @@ DEFAULT_OBS_PARAMS = {
     "critical": (6, 2, 6, 2)
 }
 
-
+#TODO: refactor to generalize the wsim functions
 class FuzzyPOMDP(PomdpEM):
     """
     EM algorithm implementation for POMDPs with:
@@ -41,7 +42,7 @@ class FuzzyPOMDP(PomdpEM):
     def __init__(self, n_states: int, n_actions: int, obs_dim: int, use_fuzzy: bool = False,
                  rho_T: float = 0.05, rho_O: float = 0.05, fuzzy_model=None,
                  verbose: bool = False, fix_transitions=None, fix_observations=None,
-                 fixed_observation_states=None):
+                 fixed_observation_states=None, obs_var_index=None):
         super().__init__(n_states, n_actions, obs_dim, verbose)
         """Initialize the POMDP model with EM capabilities"""
 
@@ -75,8 +76,8 @@ class FuzzyPOMDP(PomdpEM):
                 self.fuzzy_model = build_fuzzymodel()
             else:
                 self.fuzzy_model = fuzzy_model
-        else:
-            self.fuzzy_model = None
+
+        self.obs_var_index = obs_var_index if obs_var_index is not None else {"test_result": 0, "symptoms": 1}
 
     def _match_rule_ant(self, rule, action, O_means, state=0):
         """
@@ -84,12 +85,17 @@ class FuzzyPOMDP(PomdpEM):
         :param rule:
         :return:
         """
+        isAnd = True
         # Extract antecedents from the rule
-        antecedents = rule.split("IF")[1].split("THEN")[0].strip().split("AND")
+        if "AND" not in rule:
+            antecedents = rule.split("IF")[1].split("THEN")[0].strip().split("OR")
+            isAnd = False
+        else:
+            antecedents = rule.split("IF")[1].split("THEN")[0].strip().split("AND")
         antecedents = [antecedent.strip() for antecedent in antecedents]
 
         # Initialize match score
-        match_score = 1.0
+        match_score = 1.0 if isAnd else 0.0
 
         # Iterate through each antecedent and compute the match score
         for antecedent in antecedents:
@@ -103,18 +109,20 @@ class FuzzyPOMDP(PomdpEM):
             fuzzy_set = self.fuzzy_model.get_fuzzy_set(variable, term)
 
             # Compute the membership degree of the current observation in the fuzzy set
-            if (variable == "test_result"):
-                membership_degree = fuzzy_set.get_value(O_means[state][0])
-            elif (variable == "symptoms"):
-                membership_degree = fuzzy_set.get_value(O_means[state][1])
-            else:
+            if variable in self.obs_var_index:
+                idx = self.obs_var_index[variable]
+                membership_degree = fuzzy_set.get_value(O_means[state][idx])
+            elif action is not None:
                 membership_degree = fuzzy_set.get_value(action)
+            else:
+                raise ValueError(f"Variable {variable} not recognized in rule matching.")
 
             # Update the match score (you can use different aggregation methods)
-            match_score *= membership_degree
+            match_score *= membership_degree if isAnd else max(match_score, membership_degree)
 
         return match_score
 
+    #TODO: fix this function
     def _match_rule_ant_wsim(self, rule, action, obs):
         """
         Check how much the current observation distribution given a state matches the rule.
@@ -158,17 +166,49 @@ class FuzzyPOMDP(PomdpEM):
         """
         # Extract consequents from the rule
         consequent = rule.split("THEN")[1].strip()
-        # Initialize match score
-        match_score = 1.0
-        # Iterate through each consequent and compute the match score
+
+        if self.fuzzy_model._outputfunctions or self.fuzzy_model._outputfunctions is not None:
+            return self._match_rule_cons_mf(consequent, O_means, state)
+        else:
+            return self._match_rule_cons_fun(rule, consequent, action, O_means, state)
+
+    def _match_rule_cons_mf(self, consequent, O_means, state=0):
+        """
+        Return the consequent value given the observation model.
+        In this case the consequent is modelled as a membership function
+        """
+        variable, term = consequent.split("IS")
+        variable = variable.strip()
+        term = term.strip()
+        mapping_value = self.obs_var_index[variable]
+
+        # Get the fuzzy set for the variable and term
+        fuzzy_set = self.fuzzy_model.get_fuzzy_set(variable, term)
+        membership_degree = fuzzy_set.get_value(O_means[state][mapping_value])
+
+        # Use a safer eval approach
+        o_rule_pred = membership_degree
+        return o_rule_pred, term
+
+    def _match_rule_cons_fun(self, rule, consequent, action,  O_means, state=0):
+        """
+        Return the consequent value given the observation model.
+        In this case the consequent is modelled as a (linear) function.
+        """
+        #TODO: generalize for multiple outputs
+        #Once is generalized we can remove the rule parameter.
         if 'next_test' in rule or 'next_symptoms' in rule:
             function_str = consequent.split("IS")[1][1:5]
             term = consequent.split("IS")[0].replace("(", "").strip()
             fun = self.fuzzy_model._outputfunctions[function_str]
 
-            fun = fun.replace('test_result', str(O_means[state][0]))
-            fun = fun.replace('symptoms', str(O_means[state][1]))
-            fun = fun.replace('action', str(action))
+            for var in self.obs_var_index.keys():
+                if var in fun:
+                    fun = fun.replace(var, str(O_means[state]))
+
+            if 'action' in fun:
+                fun = fun.replace('action', str(action))
+
             # Use a safer eval approach
             o_rule_pred = eval(fun)
             return o_rule_pred, term
@@ -194,31 +234,6 @@ class FuzzyPOMDP(PomdpEM):
             o_rule_pred = eval(fun)
             return o_rule_pred, term
 
-    def _compute_pdf(self, state, obs_pred, obs_term, O_means, O_covs):
-        """
-        Compute the probability density function for the observation given the state.
-        :param state:
-        :param obs_pred:
-        :return:
-        """
-        var_o = 0
-        mean_o = 0
-        if obs_term == "next_test":
-            mean_o = O_means[state][0]
-            var_o = O_covs[state][0, 0]
-        elif obs_term == "next_symptoms":
-            mean_o = O_means[state][1]
-            var_o = O_covs[state][1, 1]
-
-        # Standard deviation is the square root of variance
-        std_o = np.sqrt(var_o)
-
-        # Compute the likelihood of observing 'observed_next_test_value'
-        l_part_obs = norm.pdf(obs_pred,
-                              loc=mean_o,
-                              scale=std_o)
-        return l_part_obs
-
     def _simulate_data_from_current(self, state=0, size=100):
         """
         Simulates the observation from the current observation model
@@ -228,116 +243,6 @@ class FuzzyPOMDP(PomdpEM):
         # Simulate the observation from the current observation model
         obs = np.random.multivariate_normal(self.obs_means[state], self.obs_covs[state], size)
         return obs
-
-    def maximization_step_AA(self, observations, actions, gammas, xis):
-        """M-step: Update model parameters based on expected sufficient statistics"""
-        # Number of sequences
-        n_sequences = len(observations)
-
-        # Update initial state probabilities
-        self.initial_prob = np.zeros(self.n_states)
-        for i in range(n_sequences):
-            self.initial_prob += gammas[i][0]
-        self.initial_prob /= n_sequences
-
-        # Copy the parameters
-        T_k = np.copy(self.transitions)
-        O_means_k = np.copy(self.obs_means)
-
-        if self.fix_transitions is None:
-            pseudo_count = np.zeros((self.n_states, self.n_actions, self.n_states))
-            # Update transition probabilities
-            for s in range(self.n_states):
-                for a in range(self.n_actions):
-                    # Count transitions for each action
-                    numerator = np.zeros(self.n_states)
-                    denominator = 0.0
-
-                    for i in range(n_sequences):
-                        for t in range(len(actions[i]) - 1):
-                            if actions[i][t] == a:
-                                # Add counts for state-action transitions
-                                for s_prime in range(self.n_states):
-                                    numerator[s_prime] += xis[i][t, s, s_prime]
-                                denominator += gammas[i][t, s]
-
-                    # PseudoCount
-                    if self.use_fuzzy:
-                        rules = self.fuzzy_model.get_rules()
-                        for s_prime in range(self.n_states):
-                            ps_count = 0
-                            for r in rules:
-                                fr_s = self._match_rule_ant(r, a, O_means_k, s)
-                                cons_s, term = self._match_rule_cons(r, a, O_means_k, s)
-
-                                y_cons = np.copy(O_means_k[s])  # Start with mean of premise state
-                                if term == "next_test":
-                                    y_cons[0] = cons_s
-                                else:  # next_symptoms
-                                    y_cons[1] = cons_s
-
-                                pdf_s_prime = self.observation_likelihood(y_cons, s_prime)
-                                ps_count += fr_s * pdf_s_prime
-                            pseudo_count[s, a, s_prime] += ps_count * self.rho_T
-
-                    # Update transition probabilities if we have observations
-                    if denominator > 0:
-                        numerator += pseudo_count[s, a, :]
-                        denominator += np.sum(pseudo_count[s, a, :])
-                        self.transitions[s, a, :] = numerator / denominator
-
-        if self.fix_observations is None:
-            # Update observation model parameters
-            obs_counts = np.zeros(self.n_states)
-            new_means = np.zeros((self.n_states, self.obs_dim))
-            data_O_sum_gamma_obs_sq = np.zeros((self.n_states, self.obs_dim, self.obs_dim))
-
-            for i in range(n_sequences):
-                for t in range(len(observations[i])):
-                    obs = observations[i][t]
-                    for s in range(self.n_states):
-                        obs_counts[s] += gammas[i][t, s]
-                        new_means[s] += gammas[i][t, s] * obs
-                        data_O_sum_gamma_obs_sq[s] += gammas[i][t, s] * np.outer(obs, obs)
-
-            # Update means and covariances
-            ps_count_den = np.zeros(self.n_states)
-            ps_count_num_mean = np.zeros((self.n_states, self.obs_dim))
-            ps_count_num_com_tmp = np.zeros((self.n_states, self.obs_dim, self.obs_dim))
-            if self.use_fuzzy:
-                for s in range(self.n_states):
-                    rules = self.fuzzy_model.get_rules()
-                    for old_s in range(self.n_states):
-                        for a in range(self.n_actions):
-                            for r in rules:
-                                fr_s = self._match_rule_ant(r, a, O_means_k, old_s)
-                                prob_new_s = T_k[old_s, a, s]
-                                cons_s, term = self._match_rule_cons(r, a, O_means_k, old_s)
-                                strength = fr_s * prob_new_s * self.rho_O
-
-                                mean_copy = np.copy(self.obs_means[old_s, :])
-                                ps_count_den[s] += strength
-                                if term == "next_test":
-                                    mean_copy[0] = cons_s
-                                    ps_count_num_mean[s, 0] += strength * cons_s
-                                else:
-                                    mean_copy[1] = cons_s
-                                    ps_count_num_mean[s, 1] += strength * cons_s
-                                ps_count_num_com_tmp[s, :, :] += strength * np.outer(mean_copy, mean_copy)
-
-            for s in range(self.n_states):
-                ps_count_num_cov_sum_matrix_s = ps_count_num_com_tmp[s, :, :]
-                if obs_counts[s] > 0:
-                    total_weight = obs_counts[s] + ps_count_den[s] + self.epsilon_prior
-                    combined_weighted_obs_sum_s = new_means[s] + ps_count_num_mean[s]
-                    self.obs_means[s] = combined_weighted_obs_sum_s / total_weight
-                    combined_weighted_obs_sq_sum_s = data_O_sum_gamma_obs_sq[s] + ps_count_num_cov_sum_matrix_s
-                    E_ooT_s = combined_weighted_obs_sq_sum_s / total_weight
-                    mu_s_outer_mu_s = np.outer(self.obs_means[s, :], self.obs_means[s, :])
-                    self.obs_covs[s, :, :] = E_ooT_s - mu_s_outer_mu_s
-                    self.obs_covs[s, :, :] += 1e-12 * np.eye(self.obs_dim)
-
-        return
 
     def maximization_step(self, observations, actions, gammas, xis):
         """M-step: Update model parameters based on expected sufficient statistics"""
@@ -397,7 +302,7 @@ class FuzzyPOMDP(PomdpEM):
                         self.transitions[s, a, :] = numerator / denominator
 
         if (self.fix_observations is None or
-            (2 > len(self.fixed_observation_states) > 0)):
+            (self.n_states > len(self.fixed_observation_states) > 0)):
 
             # Update observation model parameters
             obs_counts = np.zeros(self.n_states)
@@ -429,6 +334,7 @@ class FuzzyPOMDP(PomdpEM):
 
                                 mean_copy = np.copy(self.obs_means[old_s, :])
                                 ps_count_den[s] += strength
+                                #TODO: generalize through a term index
                                 if term == "next_test":
                                     mean_copy[0] = cons_s
                                     ps_count_num_mean[s, 0] += strength * cons_s
@@ -441,15 +347,22 @@ class FuzzyPOMDP(PomdpEM):
                 if s not in self.fixed_observation_states:
                     ps_count_num_cov_sum_matrix_s = ps_count_num_com_tmp[s, :, :]
                     if obs_counts[s] > 0:
-                        total_weight = obs_counts[s] + ps_count_den[s] + self.epsilon_prior
+                        # Sum of responsibilities (gamma) and pseudo-counts (denominator)
+                        total_count = obs_counts[s] + ps_count_den[s] + self.epsilon_prior
+                        # Sum of weighted observations from data and pseudo-count contributions (numerator for mean)
                         combined_weighted_obs_sum_s = new_means[s] + ps_count_num_mean[s]
-                        self.obs_means[s] = combined_weighted_obs_sum_s / total_weight
+                        # Update the observation mean for state s
+                        self.obs_means[s] = combined_weighted_obs_sum_s / total_count
+                        # Sum of weighted outer products (data + pseudo-counts) used to compute E[oo^T]
                         combined_weighted_obs_sq_sum_s = data_O_sum_gamma_obs_sq[s] + ps_count_num_cov_sum_matrix_s
-                        E_ooT_s = combined_weighted_obs_sq_sum_s / total_weight
+                        # Expected outer product E[oo^T] = combined sum / total_count
+                        E_ooT_s = combined_weighted_obs_sq_sum_s / total_count
+                        # Outer product of the updated mean (mu mu^T)
                         mu_s_outer_mu_s = np.outer(self.obs_means[s, :], self.obs_means[s, :])
+                        # Estimated covariance: E[oo^T] - mu mu^T
                         self.obs_covs[s, :, :] = E_ooT_s - mu_s_outer_mu_s
-                        self.obs_covs[s, :, :] += 1e-12 * np.eye(self.obs_dim)
-
+                        # Add a tiny value on the diagonal for numerical stability
+                        self.obs_covs[s, :, :] += self.epsilon_prior * np.eye(self.obs_dim)
         return
 
     def maximization_step_wsim(self, observations, actions, gammas, xis):
@@ -566,6 +479,7 @@ class FuzzyPOMDP(PomdpEM):
         return
 
 
+#TODO: move the below functions to a different file
 def rho_sensitivity_analysis():
     """Run sensitivity analysis for rho parameter in POMDP reconstruction"""
     # Parameters
@@ -962,8 +876,8 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10, fuzzy_model=None, p
 
             print(f"Transition {state} -> {next_state}:")
             print(f"  Count: {len(true_next_obs)}")
-            print(f"  Test Result R²: {r2_test:.4f} | MSE: {rmse_test:.4f}")
-            print(f"  Symptoms R²: {r2_symptoms:.4f} | MSE: {rmse_sym:.4f}")
+            print(f"  Test Result R²: {r2_test:.4f} | RMSE: {rmse_test:.4f}")
+            print(f"  Symptoms R²: {r2_symptoms:.4f} | RMSE: {rmse_sym:.4f}")
 
     print("general r2 scores:")
     test_true = np.array([obs[0] for obs in true_obs])
@@ -974,8 +888,101 @@ def evaluate_fuzzy_reward_prediction(trials=200, horizon=10, fuzzy_model=None, p
     rmse_test = root_mean_squared_error(test_true, test_pred)
     rmse_sym = root_mean_squared_error(symp_true, symp_pred)
 
-    print(f"Test Result R²: {r2_score(test_true, test_pred):.4f} | MSE: {rmse_test:.4f}")
-    print(f"Symptoms R²: {r2_score(symp_true, symp_pred):.4f} | MSE: {rmse_sym:.4f}")
+    print(f"Test Result R²: {r2_score(test_true, test_pred):.4f} | RMSE: {rmse_test:.4f}")
+    print(f"Symptoms R²: {r2_score(symp_true, symp_pred):.4f} | RMSE: {rmse_sym:.4f}")
+
+    # 1. Scatter plot dei valori reali vs predetti
+    plt.figure(figsize=(15, 6))
+
+    # Test Result
+    plt.subplot(1, 2, 1)
+    plt.scatter(test_true, test_pred, alpha=0.5)
+    plt.plot([0, 1], [0, 1], 'r--')  # linea di perfetta previsione
+    plt.xlabel('Real value (Test Result)')
+    plt.ylabel('Prediction (Test Result)')
+    plt.title('Real value vs prediction - Test Result')
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Symptoms
+    plt.subplot(1, 2, 2)
+    plt.scatter(symp_true, symp_pred, alpha=0.5)
+    plt.plot([0, 1], [0, 1], 'r--')  # linea di perfetta previsione
+    plt.xlabel('Real value (Symptoms)')
+    plt.ylabel('Prediction (Symptoms)')
+    plt.title('Real value vs prediction - Symptoms')
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
+
+    # 2. Distribuzione degli errori per stato
+    plt.figure(figsize=(15, 6))
+    states = ['healthy', 'sick', 'critical']
+    colors = ['blue', 'orange', 'green']
+
+    # Crea DataFrame per ogni stato
+    df_states = {}
+    for i, (state, true_obs, pred_obs) in enumerate(zip(
+            states,
+            [true_next_obs_healthy, true_next_obs_sick, true_next_obs_critical],
+            [pred_next_obs_healthy, pred_next_obs_sick, pred_next_obs_critical]
+    )):
+        if len(true_obs) > 0:
+            test_errors = np.array([t[0] for t in true_obs]) - np.array([p[0] for p in pred_obs])
+            symp_errors = np.array([t[1] for t in true_obs]) - np.array([p[1] for p in pred_obs])
+            df_states[state] = pd.DataFrame({
+                'Test Result': test_errors,
+                'Symptoms': symp_errors,
+                'State': state
+            })
+
+    # Unisci i DataFrame
+    df_all_states = pd.concat(df_states.values())
+    df_all_states_melted = df_all_states.melt(id_vars=['State'], var_name='Variable', value_name='Error')
+
+    # Crea il violin plot
+    sns.violinplot(x='Variable', y='Error', hue='State', data=df_all_states_melted, split=False)
+    plt.title('Error distribution by State and Variable')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+    # 3. Heatmap dell'errore medio per transizione di stato
+    plt.figure(figsize=(10, 8))
+    transitions = []
+    errors_test = []
+    errors_symp = []
+
+    for (state, next_state), data in dict_obs.items():
+        if len(data['true_next_obs']) > 0:
+            true_test = np.array([obs[0] for obs in data['true_next_obs']])
+            pred_test = np.array([obs[0] for obs in data['pred_next_obs']])
+            true_symp = np.array([obs[1] for obs in data['true_next_obs']])
+            pred_symp = np.array([obs[1] for obs in data['pred_next_obs']])
+
+            transitions.append(f"{state}->{next_state}")
+            errors_test.append(root_mean_squared_error(true_test, pred_test))
+            errors_symp.append(root_mean_squared_error(true_symp,pred_symp))
+
+    df_transitions = pd.DataFrame({
+        'Transition': transitions,
+        'Test Error': errors_test,
+        'Symptoms Error': errors_symp
+    })
+
+    # Crea una matrice per la heatmap
+    matrix_data = pd.pivot_table(
+        df_transitions,
+        values=['Test Error', 'Symptoms Error'],
+        index='Transition',
+        aggfunc='mean'
+    )
+
+    # Plot heatmap
+    sns.heatmap(matrix_data, annot=True, cmap='viridis_r', fmt='.3f')
+    plt.title('RMSE Error Heatmap by Transition')
+    plt.tight_layout()
+    plt.show()
     return
 
 

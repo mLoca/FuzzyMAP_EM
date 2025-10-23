@@ -1,20 +1,17 @@
 import random
 
 import matplotlib.pyplot as plt
-import pandas as pd
 import seaborn as sns
 import numpy as np
 from joblib import Parallel, delayed
 from scipy.stats import norm, multivariate_normal
 from sklearn.cluster import KMeans
-from sklearn.metrics import r2_score, root_mean_squared_error
 
-import utils
-from continouos_pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
+from utils import utils
 from continouos_pomdp_example import (generate_pomdp_data,
-                                      STATES, ACTIONS, ContinuousObservationModel)
-from fuzzy_model import build_fuzzymodel
-from pomdp_EM import PomdpEM
+                                      STATES)
+from fuzzy.fuzzy_model import build_fuzzymodel
+from models.trainable.pomdp_EM import PomdpEM
 
 from MG.MG_FM import _simulate_data, build_fuzzy_model
 
@@ -109,52 +106,6 @@ class FuzzyPOMDP(PomdpEM):
         self.obs_means = kmeans.cluster_centers_
         print("Initialized observation means with K-Means.")
 
-    def initialize_transitions_with_fuzzy_rules(self):
-        """
-        Initializes the transition matrix using the fuzzy rules.
-        This should be called after the observation model is initialized.
-        """
-        if not self.use_fuzzy or self.fuzzy_model is None:
-            print("Fuzzy model not in use. Skipping fuzzy transition initialization.")
-            return
-
-        print("Initializing transition matrix with fuzzy rules...")
-        initial_transitions = np.zeros((self.n_states, self.n_actions, self.n_states))
-        rules = self.fuzzy_model.get_rules()
-
-        for s in range(self.n_states):
-            for a in range(self.n_actions):
-                for s_prime in range(self.n_states):
-                    transition_strength = 0.0
-                    for r in rules:
-                        # Match antecedent with the current state's observation mean
-                        fr_s = self._match_rule_ant(r, a, self.obs_means, s)
-
-                        # Get the consequent's predicted value
-                        cons_s, term = self._match_rule_cons(r, a, self.obs_means, s)
-
-                        # Create a hypothetical next observation based on the rule
-                        y_cons = np.copy(self.obs_means[s])
-                        mapping_value = self._get_variable_mapping(term, None)
-                        y_cons[mapping_value] = cons_s
-
-                        # Calculate likelihood of this observation under the next state's model
-                        pdf_s_prime = self.observation_likelihood(y_cons, s_prime)
-                        transition_strength += fr_s * pdf_s_prime
-
-                    initial_transitions[s, a, s_prime] = transition_strength
-
-                # Normalize the probabilities for the (s, a) pair
-                total_strength = np.sum(initial_transitions[s, a, :])
-                if total_strength > 1e-9:
-                    initial_transitions[s, a, :] /= total_strength
-                else:
-                    # Fallback to uniform if no rule applies
-                    initial_transitions[s, a, :] = 1.0 / self.n_states
-
-        self.transitions = initial_transitions
-        print(self.transitions)
-        print("Transition matrix initialized.")
     def _match_rule_ant(self, rule, action, O_means, state=0):
         """
         Check how much the current observation distribution given a state matches the rule.

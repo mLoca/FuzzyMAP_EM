@@ -4,19 +4,14 @@ from time import sleep
 import numpy as np
 import matplotlib.pyplot as plt
 
-from scipy.stats import multivariate_normal, norm, entropy
-
-from typing import List, Dict, Tuple, Optional
+from scipy.stats import multivariate_normal
+from sklearn.cluster import KMeans
 
 from sklearn.mixture import GaussianMixture
 
+from continouos_pomdp_example import plot_observation_distribution, STATES, generate_pomdp_data
 
-from pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
-from continouos_pomdp_example import plot_observation_distribution, create_continuous_medical_pomdp, STATES, ACTIONS, \
-    ContinuousObservationModel, generate_pomdp_data
-from fuzzy_model import build_fuzzymodel
-
-
+#TODO: add a parameter for the regularization of the covariance matrices
 class PomdpEM:
     """
     EM algorithm implementation for POMDPs with:
@@ -25,22 +20,42 @@ class PomdpEM:
     - Continuous observations (modeled with fuzzy logic)
     """
 
-    def __init__(self, n_states: int, n_actions: int, obs_dim: int, verbose: bool = False):
+    def __init__(self, n_states: int, n_actions: int, obs_dim: int, verbose: bool = False, seed: int = 42, parallel: bool = True):
         """Initialize the POMDP model with EM capabilities"""
         self.n_states = n_states
         self.n_actions = n_actions
         self.obs_dim = obs_dim
-        # For reproducibility
+
         # Initialize model parameters
         self.transitions = np.ones((n_states, n_actions, n_states)) / n_states  # P(s'|s,a)
         self.initial_prob = np.ones(n_states) / n_states  # P(s_0)
 
+        #Seed for reproducibility
+        np.random.seed(seed)
+        random.seed(seed)
+
         # Observation model parameters (Gaussian for each state)
-        #np.random.seed(15)
         self.obs_means = np.random.normal(loc=np.abs(np.random.randn(1)), scale=0.1, size=(n_states, obs_dim))
         self.obs_covs = np.array([np.eye(obs_dim) for _ in range(n_states)])
 
         self.verbose = verbose
+        self.parallel = parallel
+
+    def initialize_with_kmeans(self, observations):
+        """
+        Initializes observation model means using K-Means clustering.
+        This provides a better starting point for the EM algorithm.
+        """
+        # Flatten the list of observation sequences into a single array
+        all_obs = np.vstack([obs_seq for obs_seq in observations])
+
+        # Use K-Means to find cluster centers
+        kmeans = KMeans(n_clusters=self.n_states, random_state=0, n_init=10)
+        kmeans.fit(all_obs)
+
+        # Assign the cluster centers as the initial means for the observation model
+        self.obs_means = kmeans.cluster_centers_
+        print("Initialized observation means with K-Means.")
 
     def observation_likelihood(self, obs, state):
         """Compute P(o|s) using multivariate Gaussian"""
@@ -50,12 +65,12 @@ class PomdpEM:
             cov=self.obs_covs[state]
         )
 
-
     def forward_pass(self, observations, actions):
         """Forward algorithm computing α_t(s)"""
         T = len(observations)
         alpha = np.zeros((T, self.n_states))
-        c = np.zeros(T)  # Normalization constants
+        c = np.zeros(T)
+
         # Initial forward probability
         for s in range(self.n_states):
             alpha[0, s] = self.initial_prob[s] * self.observation_likelihood(observations[0], s)
@@ -73,7 +88,7 @@ class PomdpEM:
                 alpha[t, s_prime] *= self.observation_likelihood(observations[t], s_prime)
 
             c[t] = np.sum(alpha[t])
-            alpha[t] /= c[t] + 1e-20
+            alpha[t] /= c[t] + 1e-20 # Avoid division by zero
 
         log_likelihood = np.sum(np.log(c))
 
@@ -84,7 +99,7 @@ class PomdpEM:
         T = len(observations)
         beta = np.zeros((T, self.n_states))
 
-        # Initialize with β_(T-1) = 1
+        # Initialize with beta_(T-1) = 1
         beta[T - 1] = np.ones(self.n_states)
 
         # Backward recursion
@@ -95,7 +110,7 @@ class PomdpEM:
                                   self.observation_likelihood(observations[t + 1], s_prime) * \
                                   beta[t + 1, s_prime]
 
-            beta[t] /= np.sum(beta[t]) + 1e-10
+            beta[t] /= np.sum(beta[t]) + 1e-10 # Normalize to prevent underflow & avoid division by zero
 
         return beta
 
@@ -219,7 +234,7 @@ class PomdpEM:
                 E_ooT_s = data_O_sum_gamma_obs_sq[s] / total_weight
                 mu_s_outer_mu_s = np.outer(self.obs_means[s, :], self.obs_means[s, :])
                 self.obs_covs[s, :, :] = E_ooT_s - mu_s_outer_mu_s
-                self.obs_covs[s, :, :] += 1e-12 * np.eye(self.obs_dim)  # Regularization
+                self.obs_covs[s, :, :] += 1e-8 * np.eye(self.obs_dim)  # Regularization
 
         return
 
@@ -230,7 +245,10 @@ class PomdpEM:
         try:
             for iteration in range(max_iterations):
                 # E-step
-                gammas, xis, log_likelihood = self.expectation_step_parallel(observations, actions)
+                if self.parallel:
+                    gammas, xis, log_likelihood = self.expectation_step_parallel(observations, actions)
+                else:
+                    gammas, xis, log_likelihood = self.expectation_step(observations, actions)
 
                 # M-step
                 self.maximization_step(observations, actions, gammas, xis)
@@ -255,6 +273,8 @@ class PomdpEM:
 
         return log_likelihood
 
+    #TODO: refactor this function to be cleaner
+    #TODO: move to a visualization module
     def compare_state_transitions(self, learned_transitions, baseline_transitions, baseline_observations, states_list, state_mapping=None):
         """
         Compares the transition probabilities for a user-selected state between
@@ -379,7 +399,7 @@ class PomdpEM:
 
 
 
-
+#TODO: move to a training module
 def train_pomdp_model(observations, actions, n_states, n_actions, obs_dim, max_iterations, tolerance):
     """Train a POMDP model using the provided data"""
 
@@ -401,7 +421,7 @@ def train_pomdp_model(observations, actions, n_states, n_actions, obs_dim, max_i
     print(f" POMDP training completed. Final log-likelihood: {log_likelihood:.4f}")
     return model, log_likelihood
 
-
+#TODO: move to a visualization module
 def visualize_observation_distributions(model, n_states, title_prefix=""):
     """Visualize the observation distributions for each state"""
     plt.figure(figsize=(15, 5))
@@ -430,7 +450,7 @@ def visualize_observation_distributions(model, n_states, title_prefix=""):
 
     plt.tight_layout()
 
-
+#TODO: move to a training module
 def run_pomdp_reconstruction():
     """Main experiment function for POMDP reconstruction"""
     # Parameters

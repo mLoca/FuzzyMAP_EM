@@ -15,7 +15,7 @@ def _load_pomdp_config(config_path):
 
 
 def get_experiment_config(n_states=None):
-    config = _load_pomdp_config('experiment_setup.json')
+    config = _load_pomdp_config('../experiment_setup.json')
     return config
 
 

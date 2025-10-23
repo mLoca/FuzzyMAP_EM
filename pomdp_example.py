@@ -28,6 +28,51 @@ DEFAULT_TRANS_PARAMS = {
     ('treat', 'critical', 'sick'): 0.65,
     ('treat', 'critical', 'critical'): 0.25,
 }
+DEFAULT_OBS_PARAMS = {
+    # Healthy state observations
+    ('healthy', 'o11'): 0.00,
+    ('healthy', 'o10'): 0.1,
+    ('healthy', 'o01'): 0.01,
+    ('healthy', 'o00'): 0.89,
+
+    # Sick state observations
+    ('sick', 'o11'): 0.06,
+    ('sick', 'o10'): 0.10,
+    ('sick', 'o01'): 0.70,
+    ('sick', 'o00'): 0.14,
+
+    # Critical state observations
+    ('critical', 'o11'): 0.90,
+    ('critical', 'o10'): 0.03,
+    ('critical', 'o01'): 0.05,
+    ('critical', 'o00'): 0.02
+}
+DEFAULT_STATES = ["healthy", "sick", "critical"]
+DEFAULT_ACTIONS = ["wait", "treat"]
+DEFAULT_REWARD = {
+    # wait rewards
+    ('wait', 'healthy', 'healthy'): +20,  # Increased reward for staying healthy
+    ('wait', 'healthy', 'sick'): -5,  # Increased penalty for deterioration
+    ('wait', 'healthy', 'critical'): -15,  # Doubled penalty for severe deterioration
+    ('wait', 'sick', 'healthy'): +10,  # Increased reward for natural recovery
+    ('wait', 'sick', 'sick'): -7,  # Slightly higher penalty for no improvement
+    ('wait', 'sick', 'critical'): -20,  # Increased penalty for worsening
+    ('wait', 'critical', 'healthy'): +15,  # Increased reward for miraculous recovery
+    ('wait', 'critical', 'sick'): +5,  # Now positive reward for partial improvement
+    ('wait', 'critical', 'critical'): -30,  # Higher penalty for staying critical
+
+    # treat rewards
+    ('treat', 'healthy', 'healthy'): -15,  # Reduced penalty for unnecessary treatment
+    ('treat', 'healthy', 'sick'): -20,  # Increased penalty for negative outcome
+    ('treat', 'healthy', 'critical'): -25,  # Increased penalty for severe negative outcome
+    ('treat', 'sick', 'healthy'): +25,  # Increased reward for successful treatment
+    ('treat', 'sick', 'sick'): -2,  # Small penalty for ineffective treatment
+    ('treat', 'sick', 'critical'): -18,  # Increased penalty for harmful treatment
+    ('treat', 'critical', 'healthy'): +40,  # Significantly increased reward for saving critical patient
+    ('treat', 'critical', 'sick'): +20,  # Doubled reward for improving critical condition
+    ('treat', 'critical', 'critical'): -15  # Reduced penalty as treatment attempt was appropriate
+}
+
 
 # Define state, action, observation classes
 class State(pomdp_py.State):
@@ -68,22 +113,22 @@ class Observation(pomdp_py.Observation):
 
 # Transition model
 class MedicalTransitionModel(pomdp_py.TransitionModel):
-    def __init__(self, params=None):
+    def __init__(self, states, transition=None):
         super().__init__()
-        if params is None:
+        if transition is None:
             self.transitions = DEFAULT_TRANS_PARAMS
         else:
-            self.transitions = params
+            self.transitions = transition
 
-        self.states = [State(s) for s in ["healthy", "sick", "critical"]]
+        self.states = [State(s) for s in states]
 
     def probability(self, next_state, state, action):
         return self.transitions.get((action.name, state.name, next_state.name), 0.0)
 
     def sample(self, state, action):
-        states = ['healthy', 'sick', 'critical']
-        probs = [self.transitions.get((action.name, state.name, s), 0.0) for s in states]
-        next_state_name = random.choices(states, weights=probs, k=1)[0]
+        state_names = [s.name for s in self.states]
+        probs = [self.transitions.get((action.name, state.name, s), 0.0) for s in state_names]
+        next_state_name = random.choices(state_names, weights=probs, k=1)[0]
         return State(next_state_name)
 
     def get_all_states(self):
@@ -92,33 +137,22 @@ class MedicalTransitionModel(pomdp_py.TransitionModel):
 
 # Observation model
 class MedicalObservationModel(pomdp_py.ObservationModel):
-    def __init__(self):
-        self.observations = {
-            # Healthy state observations
-            ('healthy', 'o11'): 0.00,
-            ('healthy', 'o10'): 0.1,
-            ('healthy', 'o01'): 0.01,
-            ('healthy', 'o00'): 0.89,
-
-            # Sick state observations
-            ('sick', 'o11'): 0.06,
-            ('sick', 'o10'): 0.10,
-            ('sick', 'o01'): 0.70,
-            ('sick', 'o00'): 0.14,
-
-            # Critical state observations
-            ('critical', 'o11'): 0.90,
-            ('critical', 'o10'): 0.03,
-            ('critical', 'o01'): 0.05,
-            ('critical', 'o00'): 0.02
-        }
-        self.all_observations = [Observation(o) for o in ['o11', 'o10', 'o01', 'o00']]
+    def __init__(self, observations=None):
+        """
+        Modello di osservazione generale.
+        :param observations: Dizionario delle probabilità di osservazione.
+                              Esempio: {("state", "observation"): prob}
+        """
+        if observations is None:
+            observations = DEFAULT_OBS_PARAMS
+        self.observations = observations
+        self.all_observations = list({Observation(o) for _, o in observations.keys()})
 
     def probability(self, observation, next_state, action):
         return self.observations.get((next_state.name, observation.name), 0.0)
 
     def sample(self, next_state, action):
-        obs_list = ['o11', 'o10', 'o01', 'o00']
+        obs_list = list({o for _, o in self.observations.keys() if _ == next_state.name})
         probs = [self.observations.get((next_state.name, o), 0.0) for o in obs_list]
         obs_name = random.choices(obs_list, weights=probs, k=1)[0]
         return Observation(obs_name)
@@ -129,31 +163,11 @@ class MedicalObservationModel(pomdp_py.ObservationModel):
 
 # Reward model
 class MedicalRewardModel(pomdp_py.RewardModel):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, reward=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.rewards = {
-            # wait rewards
-            ('wait', 'healthy', 'healthy'): +20,  # Increased reward for staying healthy
-            ('wait', 'healthy', 'sick'): -5,  # Increased penalty for deterioration
-            ('wait', 'healthy', 'critical'): -15,  # Doubled penalty for severe deterioration
-            ('wait', 'sick', 'healthy'): +10,  # Increased reward for natural recovery
-            ('wait', 'sick', 'sick'): -7,  # Slightly higher penalty for no improvement
-            ('wait', 'sick', 'critical'): -20,  # Increased penalty for worsening
-            ('wait', 'critical', 'healthy'): +15,  # Increased reward for miraculous recovery
-            ('wait', 'critical', 'sick'): +5,  # Now positive reward for partial improvement
-            ('wait', 'critical', 'critical'): -30,  # Higher penalty for staying critical
-
-            # treat rewards
-            ('treat', 'healthy', 'healthy'): -15,  # Reduced penalty for unnecessary treatment
-            ('treat', 'healthy', 'sick'): -20,  # Increased penalty for negative outcome
-            ('treat', 'healthy', 'critical'): -25,  # Increased penalty for severe negative outcome
-            ('treat', 'sick', 'healthy'): +25,  # Increased reward for successful treatment
-            ('treat', 'sick', 'sick'): -2,  # Small penalty for ineffective treatment
-            ('treat', 'sick', 'critical'): -18,  # Increased penalty for harmful treatment
-            ('treat', 'critical', 'healthy'): +40,  # Significantly increased reward for saving critical patient
-            ('treat', 'critical', 'sick'): +20,  # Doubled reward for improving critical condition
-            ('treat', 'critical', 'critical'): -15  # Reduced penalty as treatment attempt was appropriate
-        }
+        if reward is None:
+            reward = DEFAULT_REWARD
+        self.rewards = reward
 
     def _reward(self, state, action, next_state, observation=None):
         return self.rewards.get((action.name, state.name, next_state.name), 0.0)
@@ -164,9 +178,10 @@ class MedicalRewardModel(pomdp_py.RewardModel):
 
 # Policy model
 class MedicalPolicyModel(pomdp_py.RolloutPolicy):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, actions=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.actions = [MedAction(a) for a in ["wait", "treat"]]
+        actions = actions if actions is not None else DEFAULT_ACTIONS
+        self.actions = actions
 
     def sample(self, state):
         return random.choice(self.actions)
@@ -206,7 +221,7 @@ def create_medical_pomdp(use_fuzzy=False, init_state=None):
     transition_model = MedicalTransitionModel()
     observation_model = MedicalObservationModel()
     base_reward = MedicalRewardModel()
-    fuzzy_model =  None
+    fuzzy_model = None
     if use_fuzzy:
         # Use fuzzy model for reward prediction
         reward_model = FuzzyRewardModel(base_reward, fuzzy_model, weight=0.2)
