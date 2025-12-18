@@ -3,7 +3,7 @@ import random
 import pomdp_py
 from pomdp_py import ObservationModel, Agent, Environment, POMDP
 import numpy as np
-from scipy.stats import beta, norm, uniform
+from scipy.stats import beta, norm, uniform, multivariate_normal
 import pandas as pd
 
 import seaborn as sns
@@ -17,19 +17,19 @@ STATES = [State(s) for s in ["healthy", "sick", "critical"]]
 ACTIONS = [MedAction(a) for a in ["wait", "treat"]]
 DEFAULT_OBS_PARAMS = {
     # Sano: Test per lo più negativo, sintomi per lo più assenti
-    "healthy":{
-        "test":(1.8, 7.5),
-        "symptoms":(2, 10),
+    "healthy": {
+        "test": (1.8, 7.5),
+        "symptoms": (2, 10),
     },
     # Malato: Test misto ma per lo più negativo, sintomi per lo più presenti
     "sick": {
-        "test":(2.5, 4.5),
-        "symptoms":(4, 4.5),
+        "test": (2.5, 4.5),
+        "symptoms": (4, 4.5),
     },
     # Critico: Test per lo più positivo, sintomi fortemente presenti
     "critical": {
-        "test":(9, 2,),
-        "symptoms":(8.9, 2.5),
+        "test": (9, 2,),
+        "symptoms": (8.9, 2.5),
     }
 }
 DEFAULT_TRANS_PARAMS = {
@@ -60,22 +60,22 @@ DEFAULT_TRANS_PARAMS = {
 class ContinuousObservationModel(ObservationModel):
     _DIST_MAP = ["beta", "norm", "uniform"]
 
-    def __init__(self, states, actions, obs_params=None, dist_name="beta", *args, **kwargs):
+    def __init__(self, states, actions, obs_params=None, distribution="beta", *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.states = states
-        self.actions = actions
+        self.states = [State(s) for s in states]
+        self.actions = [MedAction(a) for a in actions]
 
-        if dist_name not in self._DIST_MAP:
-            raise ValueError(f"Unsupported distribution type: {dist_name}. "
+        if distribution not in self._DIST_MAP:
+            raise ValueError(f"Unsupported distribution type: {distribution}. "
                              f"Supported types are: {self._DIST_MAP}")
-        self.dist_name = dist_name
+        self.distribution = distribution
         # define  distribution parameters per state
         # format: { state_name: (alpha_test, beta_test, alpha_symp, beta_symp) }
         if obs_params is None:
             self.params = DEFAULT_OBS_PARAMS
         else:
-            for state in states:
+            for state in self.states:
                 if state.name not in obs_params:
                     raise ValueError(f"Observation parameters missing for state: {state.name}")
                 for dim, p in obs_params[state.name].items():
@@ -89,18 +89,19 @@ class ContinuousObservationModel(ObservationModel):
     def sample(self, next_state, action, **kwargs):
         dims = self.params[next_state.name]
         samples = []
-        for _, p in dims:
-            if self.dist_name == "beta":
-                a, b = p
-                samples.append(beta.rvs(a, b))
-            elif self.dist_name == "norm":
-                loc, scale = p
-                samples.append(norm.rvs(loc=loc, scale=scale))
-            elif self.dist_name == "uniform":
-                low, high = p
-                samples.append(uniform.rvs(loc=low, scale=(high - low)))
-            else:
-                raise ValueError(f"Distribuzione non supportata: {self.dist_name}")
+        if self.distribution == "beta" or self.distribution == "uniform":
+            for _, p in dims.items():
+                if self.distribution == "beta":
+                    a, b = p
+                    samples.append(beta.rvs(a, b))
+                elif self.distribution == "uniform":
+                    low, high = p
+                    samples.append(uniform.rvs(loc=low, scale=(high - low)))
+        elif self.distribution == "norm":
+            loc, scale = dims.items()
+            samples.append(multivariate_normal.rvs(mean=loc[1], cov=scale[1]))
+        else:
+            raise ValueError(f"Distribuzione non supportata: {self.distribution}")
         return np.asarray(samples)
 
     def probability(self, observation, next_state, action):
@@ -109,17 +110,17 @@ class ContinuousObservationModel(ObservationModel):
         prob = 1.0
         for i, (_, p) in enumerate(dims):
             x = obs[i]
-            if self.dist_name == "beta":
+            if self.distribution == "beta":
                 a, b = p
                 prob *= beta.pdf(x, a, b)
-            elif self.dist_name == "norm":
+            elif self.distribution == "norm":
                 loc, scale = p
                 prob *= norm.pdf(x, loc=loc, scale=scale)
-            elif self.dist_name == "uniform":
+            elif self.distribution == "uniform":
                 low, high = p
                 prob *= uniform.pdf(x, loc=low, scale=(high - low))
             else:
-                raise ValueError(f"Distribuzione non supportata: {self.dist_name}")
+                raise ValueError(f"Distribuzione non supportata: {self.distribution}")
         return prob
 
     #TODO: move to a file responsible to plotting
@@ -143,13 +144,13 @@ class ContinuousObservationModel(ObservationModel):
             for dim, p in self.params[state_name]:
                 _obs_x = np.linspace(-5, 5, 5000)
                 _obs_y = None
-                if self.dist_name == "beta":
+                if self.distribution == "beta":
                     a, b = p
                     _obs_y = beta.pdf(_obs_x, a, b)
-                elif self.dist_name == "norm":
+                elif self.distribution == "norm":
                     loc, scale = p
                     _obs_y = norm.pdf(_obs_x, loc, scale)
-                elif self.dist_name == "uniform":
+                elif self.distribution == "uniform":
                     low, high = p
                     _obs_y = uniform.pdf(_obs_x, low, high)
 
@@ -210,13 +211,13 @@ class ContinuousObservationModel(ObservationModel):
                     else:
                         _obs_X = X1
 
-                    if self.dist_name == "beta":
+                    if self.distribution == "beta":
                         a, b = p
                         _obs_y = beta.pdf(_obs_X, a, b)
-                    elif self.dist_name == "norm":
+                    elif self.distribution == "norm":
                         loc, scale = p
                         _obs_y = norm.pdf(_obs_X, loc, scale)
-                    elif self.dist_name == "uniform":
+                    elif self.distribution == "uniform":
                         low, high = p
                         _obs_y = uniform.pdf(_obs_X, low, high)
 
@@ -234,7 +235,8 @@ class ContinuousObservationModel(ObservationModel):
         plt.tight_layout()
         plt.show()
 
-#TODO: change the socpe
+
+#TODO: change the scope and generality of this function
 def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd=0.01, seed=None, pomdp=None):
     """Generate  data from POMDP model"""
     if seed is not None:
@@ -289,14 +291,14 @@ def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd=0.01, seed=N
     return pomdp, observations, actions, true_states, rewards
 
 
-def create_continuous_medical_pomdp(init_state=None, trans_params=None, obs_params=None):
+def create_continuous_medical_pomdp(init_state=None, states=None, trans_params=None, obs_params=None):
     if obs_params is None:
         obs_params = DEFAULT_OBS_PARAMS
     if trans_params is None:
         trans_params = DEFAULT_TRANS_PARAMS
 
     # Assicurati di utilizzare le versioni configurabili dei modelli
-    transition_model = MedicalTransitionModel(trans_params)
+    transition_model = MedicalTransitionModel(states, trans_params)
     reward_model = MedicalRewardModel()
     obs_model = ContinuousObservationModel(STATES, ACTIONS, obs_params)
     policy_model = MedicalPolicyModel()
@@ -328,9 +330,9 @@ def reset_pomdp(pomdp):
     This is useful for resetting the environment without losing the agent's configuration.
     """
     init_belief = pomdp_py.Histogram({
-        State("healthy"): 1 / 3,
-        State("sick"): 1 / 3,
-        State("critical"): 1 / 3
+        State("healthy"): 1 / 5,
+        State("sick"): 2 / 5,
+        State("critical"): 2 / 5
     })
 
     pomdp.agent.set_belief(init_belief, prior=True)
