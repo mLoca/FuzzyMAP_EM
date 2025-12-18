@@ -183,8 +183,8 @@ class MedicalPolicyModel(pomdp_py.RolloutPolicy):
         actions = actions if actions is not None else DEFAULT_ACTIONS
         self.actions = actions
 
-    def sample(self, state):
-        return random.choice(self.actions)
+    def sample(self, state, med_action_return=False):
+        return random.choice(self.actions) if not med_action_return else MedAction(random.choice(self.actions))
 
     def get_all_actions(self, state=None, history=None):
         return self.actions
