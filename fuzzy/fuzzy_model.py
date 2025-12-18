@@ -8,50 +8,64 @@ from pyfume import BuildTakagiSugeno, pyFUME, SugenoFISTester, DataSplitter, Fea
     AntecedentEstimator, FireStrengthCalculator, ConsequentEstimator, SugenoFISBuilder
 
 
-def collect_data(trials=1000, horizon=10, pomdp=None):
+# python
+def collect_data(
+        trials: int = 1000,
+        horizon: int = 5,
+        pomdp=None,
+        target_per_state: int = 900,
+):
+    """
+    Raccoglie dati con massimo `trials` episodi ma cerca di ottenere almeno
+    `target_per_state` occorrenze per ogni stato noto ('critical','sick','healthy').
+    Se `force_start` è True prova a inizializzare l'episodio nello stato desiderato
+    quando esistono ancora deficit.
+    """
     data = []
+    count = {'critical': 0, 'sick': 0, 'healthy': 0}
+    episodes_run = 0
 
-    count ={
-        'critical': 0,
-        'sick': 0,
-        'healthy': 0,
-    }
-
-    for episode in range(trials):
-        #random.seed(episode)  # For reproducibility
-        # Reset environment with random initial state
+    while episodes_run < trials:
+        # prepare/ reset pomdp
         if pomdp is None:
             pomdp = create_continuous_medical_pomdp()
         else:
             pomdp = reset_pomdp(pomdp)
 
+        # importance sampling: scegli uno stato da forzare se esistono deficit
         observation = pomdp.agent.observation_model.sample(pomdp.env.state, None)
-        total_reward = 0
-        if pomdp.env.state.name == "critical":
-            count["critical"] += 1
-        if pomdp.env.state.name == "sick":
-            count["sick"] += 1
-        if pomdp.env.state.name == "healthy":
-            count["healthy"] += 1
+        count[pomdp.env.state.name] += 1
 
+        # esegui episodio
+        total_reward = 0
         for step in range(horizon):
-            # Random action
+            # calcola scelte possibili per bilanciare i conteggi
+            choices = []
+            deficits = {s: max(0, target_per_state - c) for s, c in count.items()}
+            for s, d in deficits.items():
+                if d > 0:
+                    choices.extend([s] * d)
+
             action_idx = random.randint(0, len(ACTIONS) - 1)
             action = ACTIONS[action_idx]
 
-            # Execute action
-            reward = pomdp.env.state_transition(action, execute=True)
-            next_state = pomdp.env.state
+            # esegui transizione una volta per passo
+            i = 0
+            for i in range(len(choices)):
+                next_state, reward = pomdp.env.state_transition(action, execute=False)
+                if getattr(next_state, "name", None) in choices:
+                    pomdp.env.apply_transition(next_state)
+                    break
+
+            if i == len(choices) - 1 or len(choices) == 0:
+                reward = pomdp.env.state_transition(action, execute=True)
+                next_state = pomdp.env.state
+
             next_observation = pomdp.agent.observation_model.sample(next_state, action)
 
-            if next_state.name == "critical":
-                count["critical"] += 1
-            if next_state.name == "sick":
-                count["sick"] += 1
-            if next_state.name == "healthy":
-                count["healthy"] += 1
+            # incrementa conteggi quando incontri lo stato target (ricerca durante l'episodio)
+            count[next_state.name] += 1
 
-            # Collect data
             data.append({
                 'test_result': observation[0],
                 'symptoms': observation[1],
@@ -64,23 +78,25 @@ def collect_data(trials=1000, horizon=10, pomdp=None):
             total_reward += reward
             observation = next_observation
 
+        episodes_run += 1
 
     print(f"Total critical states encountered: {count['critical']}")
     print(f"Total sick states encountered: {count['sick']}")
     print(f"Total healthy states encountered: {count['healthy']}")
-    # Create DataFrame from collected data
+
     df = pd.DataFrame(data)
     return df
 
+
 def build_fuzzymodel(
-    pomdp=None,
-    seed: int = 15,
-    inputs: list[str] | None = None,
-    outputs: list[str] | None = None,
-    nr_clus: int = 3,
-    trials: int = 215,
-    horizon: int = 5,
-    save_excel: str | None = None,
+        pomdp=None,
+        seed: int = 15,
+        inputs: list[str] | None = None,
+        outputs: list[str] | None = None,
+        nr_clus: int = 3,
+        trials: int = 215,
+        horizon: int = 5,
+        save_excel: str | None = None,
 ):
     """
     Costruisce un modello fuzzy generico.
@@ -163,19 +179,22 @@ def build_fuzzymodel(
 
     return base_model
 
-def build_fuzzymodel(pomdp = None, seed = 15):
+
+def build_fuzzymodel(pomdp=None, seed=42):
     # Load and learn the fuzzy model from the data with next_test as output variable
 
     np.random.seed(seed)
     random.seed(seed)
 
     nr_clus = 3
-    df = collect_data(trials=215, horizon=5, pomdp=pomdp)
+    df = collect_data(trials=500, horizon=5, pomdp=pomdp)
+    df["action"] = df["action"].astype("category")
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
     df_test = df[["test_result", "symptoms", "action", "next_test"]]
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
-                 variable_names=['test_result', 'symptoms', 'action', 'next_test'], )
+                 variable_names=['test_result', 'symptoms', 'action', 'next_test'],
+                 verbose=False)
 
     #print("the mean squared error of the created model is", FIS.calculate_error("MSE"))
     #print("the mean area error of the created model is", FIS.calculate_error("MAE"))
@@ -185,7 +204,7 @@ def build_fuzzymodel(pomdp = None, seed = 15):
     for out in ["next_symptoms"]:
         df_test = df[["test_result", "symptoms", "action", out]]
         dl = DataLoader(dataframe=df_test,
-                        variable_names=['test_result', 'symptoms', 'action', out], )
+                        variable_names=['test_result', 'symptoms', 'action', out], verbose=False)
         variable_names = dl.variable_names
         dataX = dl.dataX
         dataY = dl.dataY
@@ -200,7 +219,7 @@ def build_fuzzymodel(pomdp = None, seed = 15):
 
         # Cluster the antecedent parameters to reduce the number of rules
         fsc = FireStrengthCalculator(antecedent_parameters=antecedent_parameters, nr_clus=nr_clus,
-                                     variable_names=variable_names)
+                                     variable_names=variable_names, verbose=False)
         firing_strengths = fsc.calculate_fire_strength(data=x_train)
 
         # Estimate the parameters of the consequent functions
@@ -208,8 +227,10 @@ def build_fuzzymodel(pomdp = None, seed = 15):
         consequent_parameters = ce.suglms()
 
         # Build a first-order Takagi-Sugeno model.
-        simpbuilder = SugenoFISBuilder(antecedent_sets=antecedent_parameters, consequent_parameters=consequent_parameters,
-                                       variable_names=variable_names)
+        simpbuilder = SugenoFISBuilder(antecedent_sets=antecedent_parameters,
+                                       consequent_parameters=consequent_parameters,
+                                       variable_names=variable_names,
+                                       verbose=False)
         model.append(simpbuilder.get_model())
 
         # Change the name of the functions in the model to avoid conflicts
@@ -238,10 +259,7 @@ def build_fuzzymodel(pomdp = None, seed = 15):
         FIS.FIS.model._outputfunctions = FIS.FIS.model._outputfunctions | model[0]._outputfunctions
         FIS.FIS.model._rules = FIS.FIS.model._rules + model[0]._rules
 
-
         return FIS.FIS.model
-
-
 
 
 if __name__ == "__main__":
