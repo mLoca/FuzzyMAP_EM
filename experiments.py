@@ -4,194 +4,322 @@ For each setup of the JSON fill, we will run three different experiments:
  - fEM with fixed observation (few data and noisy observations)
  - fEM with 0 clue (few data and noisy observations)
 """
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+
+import yaml
+
 import numpy as np
 from matplotlib import pyplot as plt
+from pomdp_py import Agent, Environment
 
-import utils
+import utils.utils as utils
+
+from models.trainable.pomdp_EM import PomdpEM
 from models.trainable.fuzzy_EM import FuzzyPOMDP, evaluate_fuzzy_reward_prediction, \
-    visualize_observation_distributions
-from fuzzy.fuzzy_model import create_continuous_medical_pomdp
+    visualize_observation_distributions, _visualize_comparison_observation_distributions
+from fuzzy.fuzzy_model import create_continuous_medical_pomdp, build_fuzzymodel
 
-from continouos_pomdp_example import STATES, generate_pomdp_data
-from mat_fuzzy_model import create_fuzzy_model
-
-SEED = 42
-N_STATES = 3  # healthy, sick, critical
-N_ACTION = 2  # wait, treat
-OBS_DIM = 2  # test_result and symptoms (continuous)
-DATA_CONFIG = ["NOISY"]  #TODO: add "FEW_DATA" to test with few data and normal
-
-PARAMETERS_CONFIG = ["FIXED_TRANSITIONS", "FIXED_OBSERVATIONS", "ZERO_CLUE",
-                     "FIXED_OBSERVATIONS_CRITICAL",
-                     "FIXED_OBSERVATIONS_SICK"]
+from continouos_pomdp_example import ContinuousObservationModel
+from pomdp_example import *
+from utils.metrics import compute_error_metrics
 
 
-def run_experiment(trajectory_length=5, n_trajectories=5, noise_sd=0.05, fuzzy_model=None,
-                   config=None,
-                   transition_matrices=None,
-                   observation_parameters=None, fig_string=None):
+class SyntheticEnvironment:
+    def __init__(self, config, distribution_type="mvn"):
+        self.n_states = config['n_states']
+        self.n_actions = config['n_actions']
+        self.obs_dim = config['obs_dim']
+
+        self.states = config['states']
+        self.actions = config['actions']
+
+        self.true_transitions = utils.from_matrix_to_triplelist(
+            config['true_transitions'],
+            states=config['states'],
+            actions=config['actions']
+        )
+        if distribution_type == "mvn":
+            self.true_observations = utils.from_observation_config_to_observation(
+                config['true_observations'],
+                states=config['states'],
+                obs_names=["mean", "cov"]
+            )
+        elif distribution_type == "beta":
+            self.true_observations = utils.from_observation_config_to_observation(
+                config['true_observations'],
+                states=config['states'],
+                obs_names=config['observations']
+            )
+
+        # Store original for evaluation
+        self.original_observations = config['true_observations']
+        self.original_transitions = config['true_transitions']
+
+        self.pomdp = self._generate_POMDP(config)
+
+    def generate_data(self, data_size, seq_length, noise_sd, seed=None):
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+        observations = []
+        actions = []
+
+        for _ in range(data_size):
+            self._reset_environment()
+            obs_seq = []
+            act_seq = []
+            current_state = self.pomdp.env.state
+            for _ in range(seq_length):
+                action = self.pomdp.agent.policy_model.sample(current_state)
+                _ = self.pomdp.env.state_transition(MedAction(action), execute=True)
+                current_state = self.pomdp.env.state
+                observation = self.pomdp.agent.observation_model.sample(current_state, action)
+                noise = np.random.normal(0, noise_sd, size=len(observation))
+                noisy_observation = np.clip(observation + noise, 0, 1)
+
+                action_idx = self.actions.index(action)
+                obs_seq.append(noisy_observation)
+                act_seq.append(action_idx)
+
+            observations.append(obs_seq)
+            actions.append(act_seq)
+
+        return observations, actions
+
+    def _generate_POMDP(self, config):
+        transition_model = MedicalTransitionModel(config["states"], self.true_transitions)
+        obs_model = ContinuousObservationModel(config["states"], config["actions"], self.true_observations,
+                                               distribution="norm")
+        policy_model = MedicalPolicyModel()
+
+        init_belief = pomdp_py.Histogram({
+            State("healthy"): 1 / 3,
+            State("sick"): 1 / 3,
+            State("critical"): 1 / 3
+        })
+
+        # NOTE: reward model is not used in data generation
+        reward_model = MedicalRewardModel()
+
+        agent = Agent(
+            init_belief=init_belief,
+            policy_model=policy_model,
+            transition_model=transition_model,
+            observation_model=obs_model,
+            reward_model=reward_model)
+
+        env = Environment(init_state=State(random.choice(config["states"])),
+                          transition_model=transition_model,
+                          reward_model=reward_model)
+        return pomdp_py.POMDP(agent, env)
+
+    def _reset_environment(self):
+        """
+        Create a new POMDP instance from an existing one.
+        This is useful for resetting the environment.
+        """
+        init_belief = pomdp_py.Histogram({
+            State("healthy"): 1 / 3,
+            State("sick"): 1 / 3,
+            State("critical"): 1 / 3
+        })
+
+        self.pomdp.agent.set_belief(init_belief, prior=True)
+        self.pomdp.agent.tree = None
+
+
+def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, config_models, standard_param, verbose):
     """
-    Run the few data experiment with fixed transition and observation models.
+    Generates ONE dataset for this run_id/size.
+    Evaluates ALL models in 'model_configs_list' on this exact dataset.
     """
 
-    # Create the POMDP environment
-    formatted_transition_matrices = None
-    formatted_observation_parameters = None
-    if transition_matrices is not None:
-        formatted_transition_matrices = utils.from_matrix_to_triplelist(transition_matrices)
-    if observation_parameters is not None:
-        formatted_observation_parameters = utils.from_observation_config_to_observation(observation_parameters)
+    results_batch = []
+    results_model = []
 
-    pomdp_with_param = create_continuous_medical_pomdp(trans_params=formatted_transition_matrices,
-                                                       obs_params=formatted_observation_parameters)
+    # Generate dataset
 
-    # Collect data with few trials and horizon
+    env = SyntheticEnvironment(env_config)
+    obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=seed)
 
-    original_pomdp, observations, actions, true_states, rewards = generate_pomdp_data(
-        trajectory_length=trajectory_length, n_trajectories=n_trajectories, seed=SEED, noise_sd=noise_sd,
-        pomdp=pomdp_with_param
-    )
+    fuzzy_model = build_fuzzymodel(env.pomdp,
+                                   seed=seed)
 
-    # to reuse the fuzzy model if it is already built
-    if fuzzy_model is None:
-        with utils.suppress_output():
-            #fuzzy_model = build_fuzzymodel(original_pomdp, seed=SEED)
-            fuzzy_model = create_fuzzy_model()
-        evaluate_fuzzy_reward_prediction(600, 5, fuzzy_model=fuzzy_model, pomdp=original_pomdp, seed=SEED)
-        #original_pomdp.agent.observation_model.plot_observation_distributions_2_axes()
+    np.random.seed(seed)
+    random.seed(seed)
 
-    #fit_and_performance(
-    #    original_pomdp, observations, actions, config,
-    #    fuzzy_model=fuzzy_model,
-    #    fix_transitions=transition_matrices if config["fix_transitions"] else None,
-    #    fix_observations=observation_parameters if config["fix_observations"] else None,
-    #    fig_string=fig_string+"_Fuzzy.png")
-#
-    #fit_and_performance(
-    #    original_pomdp, observations, actions, config,
-    #    fuzzy_model=None,
-    #    fix_transitions=transition_matrices if config["fix_transitions"] else None,
-    #    fix_observations=observation_parameters if config["fix_observations"] else None,
-    #    fig_string=fig_string+"_Standard.png")
+    for model_config in config_models:
+        model_name = model_config["name"]
+        model_cls = model_config["class"]
+        model_params = model_config.get("params", {})
 
-    return fuzzy_model
+        try:
+            params = model_params.copy()
 
+            #TODO: fixed part if is necessary.
+            #if config_item.get('fix_transitions', False):
+            #    params['fix_transitions'] = env.true_transitions
+            #if config_item.get('fix_observations', False):
+            #    pass
+            #if 'fixed_observation_states' in config_item:
+            #    params['fixed_observation_states'] = config_item['fixed_observation_states']
+            if model_cls == "PomdpEM":
+                model = PomdpEM(n_states=env.n_states,
+                                n_actions=env.n_actions,
+                                obs_dim=env.obs_dim,
+                                verbose=verbose,
+                                seed=seed,
+                                **params)
+            elif model_cls == "FuzzyPOMDP":
 
-def fit_and_performance(original_pomdp, observations, actions, config, fuzzy_model=None,
-                        fix_transitions=None, fix_observations=None, fig_string = None):
-    """
-    Fit the fuzzy POMDP and evaluate its performance.
-    """
-    try:
-        if fuzzy_model is not None:
-            use_fuzzy = True
-            rho_T = config["rho_T"]
-            rho_O = config["rho_O"]
+                model = FuzzyPOMDP(n_states=env.n_states,
+                                   n_actions=env.n_actions,
+                                   obs_dim=env.obs_dim,
+                                   verbose=verbose,
+                                   seed=seed,
+                                   fuzzy_model=fuzzy_model,
+                                   **params)
+            else:
+                raise ValueError(f"Unknown model class: {model_cls}")
+
+            print(f"\\n Training model {model_name} on dataset (size={data_size}, seq_length={seq_length}, "
+                  f"noise_sd={noise_sd}, trial={trial})...")
+
+            start_time = time.time()
+            #TODO: add the kmeans initialization if necessary
+
+            fit_ll = model.fit(obs, acts,
+                               max_iterations=standard_param["n_iterations"],
+                               tolerance=float(standard_param["tolerance"]))
+            #visualize_observation_distributions(model, env.n_states, title_prefix=f"{model_name}",
+            #                                    datasize=f"{data_size}_noise{noise_sd}")
+            metrics = compute_error_metrics(model,
+                                            env.original_transitions,
+                                            env.original_observations,
+                                            env.states)
+
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            results_model.append({
+                "name": model_name,
+                "model": model,
+                "perm_ord": metrics['perm_ord']
+            })
+
+            results_batch.append({
+                "model_name": model_name,
+                "env_name": env_config['name'],
+                "data_size": data_size,
+                "sequence_length": seq_length,
+                "noise_sd": noise_sd,
+                "trial": trial,
+                "final_log_likelihood": fit_ll,
+                "training_time_sec": elapsed_time,
+                "metrics": metrics
+            })
+
+            print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
+            print(f"  Final metrics: {metrics}")
+
+        except Exception as e:
+            print(f" Model {model_name} failed: {e}")
+
+    _visualize_comparison_observation_distributions(results_model, env.n_states,"",
+                                                       f"{data_size} Noise: {noise_sd}")
+    return results_batch
+
+def main():
+    config_path = os.path.join(os.path.dirname(__file__), 'config', 'experiments.yaml')
+    if not os.path.exists(config_path):
+        print(f"Configuration file {config_path} not found.")
+        return
+
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+
+    global_settings = config["global_settings"]
+    seed = global_settings.get("seed", 42)
+    verbose = global_settings.get("verbose", True)
+    environments = config["environments"]
+    all_env_names = [env['name'] for env in environments]
+    results_summary = {}
+
+    for exp_id, exp_config in config['experiments'].items():
+        if not exp_config.get("active", True):
+            continue
+
+        print(f"Running experiment {exp_id}...")
+        print(f"Experiment description: {exp_config.get('description', 'No description provided.')}")
+
+        results_summary[exp_id] = {}
+        seq_length, n_trials, noise_levels = exp_config["sequence_length"], exp_config["n_trials"], exp_config[
+            "noise_level"]
+        env_names, dataset_sizes = exp_config["environments"], exp_config["dataset_sizes"]
+
+        tasks = []
+        for env_name in env_names:
+            if env_name not in all_env_names:
+                print(f"Environment {env_name} not found in configuration.")
+                continue
+
+            print(f"Using environment: {env_name}")
+            env_config = [e for e in environments if e['name'] == env_name][0]
+            results_summary[exp_id][env_name] = {}
+
+            config_models = exp_config["models"]
+            standard_param = exp_config.get("standard_params", {})
+            # One task per (Dataset Size,  noise_level,  n_trial)
+            # Each task will run ALL batch_configs on that specific dataset
+
+            for data_size in dataset_sizes:
+                for noise_sd in noise_levels:
+                    for trial in range(n_trials):
+                        tasks.append((trial, env_config, data_size, seq_length, noise_sd, seed, config_models,
+                                      standard_param, verbose))
+
+        if not(global_settings.get("parallel_execution", False)):
+            # Run tasks SEQUENTIALLY
+            for t in tasks:
+                batch_res = run_dataset_batch(*t)
+                # Unpack batch results into the structured summary
+                for res in batch_res:
+                    m_name = res.get('model_name', 'unknown')
+                    env_name = res.get('env_name', 'unknown')
+                    if m_name not in results_summary[exp_id][env_name]:
+                        results_summary[exp_id][env_name][m_name] = []
+                    results_summary[exp_id][env_name][m_name].append(res)
         else:
-            rho_T = 0.0
-            rho_O = 0.0
-            use_fuzzy = False
-
-        fuzzy_pomdp = FuzzyPOMDP(n_states=N_STATES, n_actions=N_ACTION, obs_dim=OBS_DIM, use_fuzzy=use_fuzzy,
-                                 fuzzy_model=fuzzy_model, rho_T=rho_T, rho_O=rho_O, fix_transitions=fix_transitions,
-                                 fix_observations=fix_observations,
-                                 fixed_observation_states=config["fix_observations_states"])
-
-        fuzzy_ll = fuzzy_pomdp.fit(
-            observations, actions,
-            max_iterations=200,
-            tolerance=1e-5
-        )
-
-        np.set_printoptions(precision=2, formatter={'float': '{: 0.2f}'.format})
-        print(f"Learning POMDP transitions:\n{fuzzy_pomdp.transitions}")
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 6)) as executor:
+                futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
+                for future in as_completed(futures):
+                    try:
+                        batch_res = future.result()
+                        # Unpack batch results into the structured summary
+                        for res in batch_res:
+                            m_name = res.get('model_name', 'unknown')
+                            env_name = res.get('env_name', 'unknown')
+                            if m_name not in results_summary[exp_id][env_name]:
+                                results_summary[exp_id][env_name][m_name] = []
+                            results_summary[exp_id][env_name][m_name].append(res)
+                    except Exception as e:
+                        print(f"    Batch failed: {e}")
 
 
-        #save the plot
-        title_prefix = "Fuzzy" if use_fuzzy else "Standard"
-
-        visualize_observation_distributions(fuzzy_pomdp, N_STATES, title_prefix=title_prefix)
-        if fig_string is not None:
-            plt.savefig("img/"+fig_string)
-        plt.show()
-
-        fuzzy_pomdp.compare_state_transitions(
-            fuzzy_pomdp.transitions,
-            original_pomdp.env.transition_model.transitions,
-            original_pomdp.agent.observation_model,
-            STATES
-        )
-    except Exception as e:
-        print(f"Error during fitting and performance evaluation: {e}")
-
-
-
-def run_set_of_experiments():
-    """
-    Run a set of experiments with different configurations.
-    """
-    config = utils.get_experiment_config()
-
-    for key, value_config in config.items():
-        fuzzy_model_tmp = None
-        for data_config in DATA_CONFIG:
-            traj_length = 5
-            n_trajectories = 20
-            noise_sd = 0.0
-
-            if data_config == "NORMAL":
-                traj_length = 5
-                n_trajectories = 20
-                noise_sd = 0.02
-            elif data_config == "NOISY":
-                traj_length = 5
-                n_trajectories = 11
-                noise_sd = 0.01
-            elif data_config == "FEW_DATA":
-                traj_length = 3
-                n_trajectories = 5
-                noise_sd = 0.02
-
-            for parameters_config in PARAMETERS_CONFIG:
-                print("###")
-                print(f"Running experiment {key} with {data_config} and {parameters_config}")
-                print("###")
-                transition_matrices = value_config["transitions"]
-                observation_parameters = value_config["observations"]
-                value_config["fix_observations_states"] = None
-
-                if parameters_config == "FIXED_TRANSITIONS":
-                    value_config["fix_transitions"] = True
-                    value_config["fix_observations"] = False
-                    value_config["fix_observations_states"] = None
-                elif parameters_config == "FIXED_OBSERVATIONS":
-                    value_config["fix_transitions"] = False
-                    value_config["fix_observations"] = True
-                    value_config["fix_observations_states"] = [0, 1, 2]
-                elif parameters_config == "FIXED_OBSERVATIONS_CRITICAL":
-                    value_config["fix_transitions"] = False
-                    value_config["fix_observations"] = True
-                    value_config["fix_observations_states"] = [2]
-                elif parameters_config == "FIXED_OBSERVATIONS_SICK":
-                    value_config["fix_transitions"] = False
-                    value_config["fix_observations"] = True
-                    value_config["fix_observations_states"] = [1]
-                else:
-                    value_config["fix_transitions"] = False
-                    value_config["fix_observations"] = False
-                    value_config["fix_observations_states"] = None
-
-                fig_string = f"{key}_{data_config}_{parameters_config}"
-
-                fuzzy_model_tmp = run_experiment(trajectory_length=traj_length,
-                                                 n_trajectories=n_trajectories,
-                                                 noise_sd=noise_sd,
-                                                 config=value_config,
-                                                 fuzzy_model=fuzzy_model_tmp,
-                                                 transition_matrices=transition_matrices,
-                                                 observation_parameters=observation_parameters,
-                                                 fig_string=fig_string)
-
+    print("All experiments completed. Summary of results:")
+    for exp_id, env_results in results_summary.items():
+        print(f"Experiment {exp_id}:")
+        for env_name, model_results in env_results.items():
+            print(f" Environment: {env_name}")
+            for model_name, results in model_results.items():
+                print(f"  Model: {model_name}")
+                for res in results:
+                    print(f"   Data Size: {res['data_size']}, Seq Length: {res['sequence_length']}, "
+                          f"Noise SD: {res['noise_sd']}, Trial: {res['trial']}, "
+                          f"Final LL: {res['final_log_likelihood']:.2f}, "
+                          f"Training Time (s): {res['training_time_sec']:.2f}, "
+                          f"Metrics: {res['metrics']}")
 
 if __name__ == "__main__":
-    run_set_of_experiments()
+    main()
