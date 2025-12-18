@@ -4,8 +4,7 @@ import sys
 from contextlib import contextmanager
 
 import numpy as np
-
-from pomdp_example import State
+from scipy.special import digamma
 
 
 def _load_pomdp_config(config_path):
@@ -14,14 +13,7 @@ def _load_pomdp_config(config_path):
     return config
 
 
-def get_experiment_config(n_states=None):
-    config = _load_pomdp_config('../experiment_setup.json')
-    return config
-
-
-def from_matrix_to_triplelist(transition_matrix):
-    states = ["healthy", "sick", "critical"]
-    actions = ["wait", "treat"]
+def from_matrix_to_triplelist(transition_matrix, states=None, actions=None):
     triples = {}
     for j, action in enumerate(actions):
         for i, state in enumerate(states):
@@ -37,16 +29,21 @@ def from_matrix_to_triplelist(transition_matrix):
     return triples
 
 
-def from_observation_config_to_observation(observation_config):
-    states = ["healthy", "sick", "critical"]
+def from_observation_config_to_observation(observation_config, states=None, obs_names=None, distribution_type="mvn"):
     obs = {}
-    for i, state in enumerate(states):
-        #beta are the first and third and alha the second and fourth
+    for state in states:
         obs.update({
-            state: (observation_config[state][0], observation_config[state][1],
-                    observation_config[state][2], observation_config[state][3])
+            state: {}
         })
+        for obs_name in obs_names:
+            obs[state].update({
+                obs_name: []
+            })
+            obs[state][obs_name].extend(observation_config[0][state][obs_name])
+
     return obs
+
+
 
 
 def from_beta_to_multivariate_normal(beta):
@@ -78,6 +75,18 @@ def from_beta_to_multivariate_normal(beta):
         "means": means,
         "covariances": covariances
     }
+
+
+def _prob_sum(p, q):
+    return p + q - p * q
+
+@staticmethod
+def multidigamma(x, d):
+    """Compute the multivariate digamma function"""
+    result = 0
+    for i in range(1, d + 1):
+        result += digamma(x + (1 - i) / 2)
+    return result
 
 
 @contextmanager
