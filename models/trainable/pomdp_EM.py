@@ -184,13 +184,12 @@ class PomdpEM:
             total_ll += seq_ll
         return gammas, xis, total_ll
 
-
     def expectation_step_parallel(self, observations, actions):
         """Parallelized E-step using multi-processing"""
         import multiprocessing as mp
 
         ctx = mp.get_context('spawn')
-        with ctx.Pool(processes=min(mp.cpu_count(), len(observations))) as pool:
+        with ctx.Pool(processes=min(mp.cpu_count(), 8)) as pool:
             results = pool.starmap(
                 self._process_single_sequence,
                 [(obs_seq, act_seq) for obs_seq, act_seq in zip(observations, actions)]
@@ -202,7 +201,7 @@ class PomdpEM:
 
         return list(gammas), list(xis), total_ll
 
-    def maximization_step(self, observations, actions, gammas, xis):
+    def maximization_step(self, observations, actions, gammas, xis, iteration=0):
         """M-step: Update model parameters based on expected sufficient statistics"""
         # Number of sequences
         n_sequences = len(observations)
