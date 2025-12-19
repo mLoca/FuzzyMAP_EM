@@ -48,7 +48,7 @@ class FuzzyPOMDP(PomdpEM):
                  verbose=False, fix_transitions=None, fix_observations=None,
                  fixed_observation_states=None, obs_var_index=None, parallel=True,
                  use_adaptive_lambda=True,
-                 integration_method="mean",  # 'mean' or 'monte_carlo'
+                 integration_method="mean",  # 'mean' or 'montecarlo'
                  mc_samples=100,
                  hyperparameter_update_method="static",  # 'static', 'adaptive', 'empirical_bayes'
                  eb_learning_rate=0.01,
@@ -116,7 +116,7 @@ class FuzzyPOMDP(PomdpEM):
         :param rule:
         :return:
         """
-        if self.integration_method == "monte_carlo":
+        if self.integration_method == "montecarlo":
             points = np.random.multivariate_normal(
                 mean=self.obs_means[state],
                 cov=self.obs_covs[state],
@@ -183,7 +183,7 @@ class FuzzyPOMDP(PomdpEM):
         Return the consequent value given the observation model.
         In this case the consequent is modelled as a membership function
         """
-        if self.integration_method == "monte_carlo":
+        if self.integration_method == "montecarlo":
             points = np.random.multivariate_normal(
                 mean=self.obs_means[state],
                 cov=self.obs_covs[state],
@@ -280,7 +280,7 @@ class FuzzyPOMDP(PomdpEM):
 
         return pseudo_count_T, pseudo_count_O_den, pseudo_count_O_mean, pseudo_count_O_cov
 
-    def maximization_step(self, observations, actions, gammas, xis):
+    def maximization_step(self, observations, actions, gammas, xis, iteration=0):
         """M-step: Update model parameters based on expected sufficient statistics"""
         # Number of sequences
         n_observations = len(observations)
@@ -318,7 +318,8 @@ class FuzzyPOMDP(PomdpEM):
 
         # Hyperparameter update
         if self.use_fuzzy and self.hp_method == "adaptive":
-            self._update_hyperparameters_adaptive(fuzzy_N_T, fuzzy_N_O)
+            if iteration > 10:
+                self._update_hyperparameters_adaptive(fuzzy_N_T, fuzzy_N_O)
         elif self.use_fuzzy and self.hp_method == "empirical_bayes":
             self._empirical_bayes_transition(emp_N_T, fuzzy_N_T)
             self._empirical_bayes_observation(emp_N_O, emp_Sum_O, emp_Sum_sq_O,
@@ -381,7 +382,7 @@ class FuzzyPOMDP(PomdpEM):
                 prev_ll = log_likelihood
 
                 # M-step
-                self.maximization_step(observations, actions, gammas, xis)
+                self.maximization_step(observations, actions, gammas, xis, iteration)
 
                 history["lambda_T"].append(self.lambda_T.copy())
                 history["lambda_O"].append(self.lambda_O.copy())
