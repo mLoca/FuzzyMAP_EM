@@ -139,6 +139,7 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
 
     results_batch = []
     results_model = []
+    seed = seed + trial  # Different seed per trial
 
     # Generate dataset
     dist_type = env_config.get("distribution_type", "mvn")
@@ -157,79 +158,80 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
         model_name = model_config["name"]
         model_cls = model_config["class"]
         model_params = model_config.get("params", {})
+        if model_config["active"] is True:
+            print(f" Running model: {model_name}")
+            try:
+                params = model_params.copy()
 
-        try:
-            params = model_params.copy()
+                #TODO: fixed part if is necessary.
+                #if config_item.get('fix_transitions', False):
+                #    params['fix_transitions'] = env.true_transitions
+                #if config_item.get('fix_observations', False):
+                #    pass
+                #if 'fixed_observation_states' in config_item:
+                #    params['fixed_observation_states'] = config_item['fixed_observation_states']
+                if model_cls == "PomdpEM":
+                    model = PomdpEM(n_states=env.n_states,
+                                    n_actions=env.n_actions,
+                                    obs_dim=env.obs_dim,
+                                    verbose=verbose,
+                                    seed=seed,
+                                    **params)
+                elif model_cls == "FuzzyPOMDP":
 
-            #TODO: fixed part if is necessary.
-            #if config_item.get('fix_transitions', False):
-            #    params['fix_transitions'] = env.true_transitions
-            #if config_item.get('fix_observations', False):
-            #    pass
-            #if 'fixed_observation_states' in config_item:
-            #    params['fixed_observation_states'] = config_item['fixed_observation_states']
-            if model_cls == "PomdpEM":
-                model = PomdpEM(n_states=env.n_states,
-                                n_actions=env.n_actions,
-                                obs_dim=env.obs_dim,
-                                verbose=verbose,
-                                seed=seed,
-                                **params)
-            elif model_cls == "FuzzyPOMDP":
+                    model = FuzzyPOMDP(n_states=env.n_states,
+                                       n_actions=env.n_actions,
+                                       obs_dim=env.obs_dim,
+                                       verbose=verbose,
+                                       seed=seed,
+                                       fuzzy_model=fuzzy_model,
+                                       **params)
+                else:
+                    raise ValueError(f"Unknown model class: {model_cls}")
 
-                model = FuzzyPOMDP(n_states=env.n_states,
-                                   n_actions=env.n_actions,
-                                   obs_dim=env.obs_dim,
-                                   verbose=verbose,
-                                   seed=seed,
-                                   fuzzy_model=fuzzy_model,
-                                   **params)
-            else:
-                raise ValueError(f"Unknown model class: {model_cls}")
+                print(f"\\n Training model {model_name} on dataset (size={data_size}, seq_length={seq_length}, "
+                      f"noise_sd={noise_sd}, trial={trial})...")
 
-            print(f"\\n Training model {model_name} on dataset (size={data_size}, seq_length={seq_length}, "
-                  f"noise_sd={noise_sd}, trial={trial})...")
+                start_time = time.time()
+                #TODO: add the kmeans initialization if necessary
 
-            start_time = time.time()
-            #TODO: add the kmeans initialization if necessary
+                fit_ll = model.fit(obs, acts,
+                                   max_iterations=standard_param["n_iterations"],
+                                   tolerance=float(standard_param["tolerance"]))
+                #visualize_observation_distributions(model, env.n_states, title_prefix=f"{model_name}",
+                #                                    datasize=f"{data_size}_noise{noise_sd}")
 
-            fit_ll = model.fit(obs, acts,
-                               max_iterations=standard_param["n_iterations"],
-                               tolerance=float(standard_param["tolerance"]))
-            #visualize_observation_distributions(model, env.n_states, title_prefix=f"{model_name}",
-            #                                    datasize=f"{data_size}_noise{noise_sd}")
+                metrics = compute_error_metrics(model,
+                                                env.original_transitions,
+                                                env.original_observations,
+                                                env.states,
+                                                dist_type=dist_type)
 
-            metrics = compute_error_metrics(model,
-                                            env.original_transitions,
-                                            env.original_observations,
-                                            env.states,
-                                            dist_type=dist_type)
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                results_model.append({
+                    "name": model_name,
+                    "model": model,
+                    "perm_ord": metrics['perm_ord']
+                })
 
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            results_model.append({
-                "name": model_name,
-                "model": model,
-                "perm_ord": metrics['perm_ord']
-            })
+                results_batch.append({
+                    "model_name": model_name,
+                    "env_name": env_config['name'],
+                    "data_size": data_size,
+                    "sequence_length": seq_length,
+                    "noise_sd": noise_sd,
+                    "trial": trial,
+                    "final_log_likelihood": fit_ll,
+                    "training_time_sec": elapsed_time,
+                    "metrics": metrics
+                })
 
-            results_batch.append({
-                "model_name": model_name,
-                "env_name": env_config['name'],
-                "data_size": data_size,
-                "sequence_length": seq_length,
-                "noise_sd": noise_sd,
-                "trial": trial,
-                "final_log_likelihood": fit_ll,
-                "training_time_sec": elapsed_time,
-                "metrics": metrics
-            })
+                print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
+                print(f"  Final metrics: {metrics}")
 
-            print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
-            print(f"  Final metrics: {metrics}")
-
-        except Exception as e:
-            print(f" Model {model_name} failed: {e}")
+            except Exception as e:
+                print(f" Model {model_name} failed: {e}")
 
     _visualize_comparison_observation_distributions(results_model, env.n_states,"",
                                                        f"{data_size} Noise: {noise_sd}")
