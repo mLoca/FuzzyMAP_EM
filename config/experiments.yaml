@@ -13,20 +13,21 @@ environments:
     states: [ "healthy", "sick",  "critical" ]
     observations: [ "test_result", "symptoms" ]
     actions: [ "wait", "treat" ]
+    distribution_type: "mvn"
     true_transitions:
-      - [ [ 0.85, 0.10, 0.05 ], [ 0.75, 0.15, 0.10 ] ]
-      - [ [ 0.30, 0.60, 0.10 ], [ 0.60, 0.35, 0.05 ] ]
-      - [ [ 0.01, 0.05, 0.94 ], [ 0.10, 0.65, 0.25 ] ]
+      - [[0.90, 0.05, 0.05], [0.80, 0.10, 0.10]]
+      - [[0.30, 0.65, 0.05], [0.60, 0.35, 0.05]]
+      - [[0.05, 0.05, 0.90], [0.15, 0.60, 0.25]]
     true_observations:
       - healthy:
           mean: [ 0.2, 0.2]
-          cov: [[ 0.95, 0.05 ], [ 0.05, 0.95 ]]
+          cov: [[ 0.03, 0.001], [ 0.001, 0.03 ]]
         sick:
-          mean: [ 0.8, 0.2]
-          cov: [[ 0.95, 0.05 ], [ 0.05, 0.95 ]]
+          mean: [ 0.4, 0.80]
+          cov: [[ 0.04, 0.001 ], [ 0.001, 0.07 ]]
         critical:
           mean: [ 0.8, 0.8]
-          cov: [[ 0.95, 0.05 ], [ 0.05, 0.95 ]]
+          cov: [[ 0.03, 0.001 ], [ 0.001, 0.03 ]]
 
   - name: "env_standard_healthcare"
     n_states: 3
@@ -35,10 +36,11 @@ environments:
     states: ["healthy", "sick",  "critical"]
     observations: ["test_result", "symptoms"]
     actions: ["wait", "treat"]
+    distribution_type: "beta"
     true_transitions:
-      - [[0.85, 0.10, 0.05], [0.75, 0.15, 0.10]]
-      - [[0.30, 0.60, 0.10], [0.60, 0.35, 0.05]]
-      - [[0.01, 0.05, 0.94], [0.10, 0.65, 0.25]]
+      - [[0.90, 0.05, 0.05], [0.80, 0.10, 0.10]]
+      - [[0.30, 0.65, 0.05], [0.60, 0.35, 0.05]]
+      - [[0.05, 0.05, 0.90], [0.15, 0.60, 0.25]]
     true_observations:
       - healthy:
            test_result: [1.8, 7.5]
@@ -57,6 +59,7 @@ environments:
     states: ["healthy", "sick",  "critical"]
     observations: ["test_result", "symptoms"]
     actions: ["wait", "treat"]
+    distribution_type: "beta"
     true_transitions:
       - [[0.80, 0.15, 0.05], [0.75, 0.15, 0.10]]
       - [[0.30, 0.60, 0.10], [0.60, 0.30, 0.10]]
@@ -79,6 +82,7 @@ environments:
     states: ["healthy", "sick",  "critical"]
     observations: ["test_result", "symptoms"]
     actions: ["wait", "treat"]
+    distribution_type: "beta"
     true_transitions:
       - [[0.75, 0.20, 0.05], [0.70, 0.25, 0.05]]
       - [[0.20, 0.70, 0.10], [0.55, 0.40, 0.05]]
@@ -98,10 +102,11 @@ experiments:
   data_efficiency_study:
     active: true
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
-    environments: ["env_standard_healthcare_mvn", "env_standard_healthcare", "env_medium_healthcare", "env_hard_healthcare"]
+    environments: ["env_standard_healthcare_mvn", "env_standard_healthcare",
+                   "env_medium_healthcare", "env_hard_healthcare"]
     sequence_length: 3
 
-    dataset_sizes: [15, 25, 50, 75, 100]
+    dataset_sizes: [15, 30, 50]
     noise_level: [0.01]
     n_trials: 1
 
@@ -116,7 +121,6 @@ experiments:
         params:
           parallel: false
 
-
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
         params: &default_fuzzy_params
@@ -125,18 +129,18 @@ experiments:
           lambda_T: 0.1
           lambda_O: 0.05
           hyperparameter_update_method: "static"
-          integration_method: "mean"
-          mc_samples: 1500
+          integration_method: "montecarlo"
+          mc_samples: 150
 
       - name: "Fuzzy_Adaptive_EM"
         class: "FuzzyPOMDP"
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "adaptive"
-          integration_method: "mean"
+          integration_method: "montecarlo"
           alpha_ah: 1
-          lambda_T: 0.5
-          lambda_O: 0.5
+          lambda_T: 0.15
+          lambda_O: 0.075
 
 #      - name: "Fuzzy_EB_EM"
 #        class: "FuzzyPOMDP"
