@@ -40,6 +40,7 @@ class SyntheticEnvironment:
             states=config['states'],
             actions=config['actions']
         )
+        self.distribution_type = distribution_type
         if distribution_type == "mvn":
             self.true_observations = utils.from_observation_config_to_observation(
                 config['true_observations'],
@@ -91,7 +92,7 @@ class SyntheticEnvironment:
     def _generate_POMDP(self, config):
         transition_model = MedicalTransitionModel(config["states"], self.true_transitions)
         obs_model = ContinuousObservationModel(config["states"], config["actions"], self.true_observations,
-                                               distribution="norm")
+                                               distribution=self.distribution_type)
         policy_model = MedicalPolicyModel()
 
         init_belief = pomdp_py.Histogram({
@@ -140,9 +141,11 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
     results_model = []
 
     # Generate dataset
-
-    env = SyntheticEnvironment(env_config)
+    dist_type = env_config.get("distribution_type", "mvn")
+    env = SyntheticEnvironment(env_config, distribution_type=dist_type)
     obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=seed)
+
+    #env.pomdp.agent.observation_model.plot_observation_distribution()
 
     fuzzy_model = build_fuzzymodel(env.pomdp,
                                    seed=seed)
@@ -195,10 +198,12 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
                                tolerance=float(standard_param["tolerance"]))
             #visualize_observation_distributions(model, env.n_states, title_prefix=f"{model_name}",
             #                                    datasize=f"{data_size}_noise{noise_sd}")
+
             metrics = compute_error_metrics(model,
                                             env.original_transitions,
                                             env.original_observations,
-                                            env.states)
+                                            env.states,
+                                            dist_type=dist_type)
 
             end_time = time.time()
             elapsed_time = end_time - start_time
@@ -291,7 +296,7 @@ def main():
                         results_summary[exp_id][env_name][m_name] = []
                     results_summary[exp_id][env_name][m_name].append(res)
         else:
-            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 6)) as executor:
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 10)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
