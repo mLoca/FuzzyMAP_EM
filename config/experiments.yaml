@@ -1,8 +1,8 @@
 global_settings:
-  random_seed: 5245
+  random_seed: 58
   output_dir: "./results/"
   verbose: False
-  parallel_execution: False
+  parallel_execution: True
 
 environments:
 
@@ -102,30 +102,31 @@ experiments:
   data_efficiency_study:
     active: true
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
-    environments: ["env_standard_healthcare_mvn", "env_standard_healthcare",
-                   "env_medium_healthcare", "env_hard_healthcare"]
+    environments: ["env_standard_healthcare_mvn"]
     sequence_length: 3
 
-    dataset_sizes: [15, 30, 50]
+    dataset_sizes: [10, 15, 20, 30, 50]
     noise_level: [0.01]
     n_trials: 1
 
     standard_params:
-        n_iterations: 300
+        n_iterations: 500
         tolerance: 1e-5
         init_method: "random"
 
     models:
       - name: "Standard_EM"
         class: "PomdpEM"
+        active: True
         params:
-          parallel: false
+          parallel: False
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
+        active: False
         params: &default_fuzzy_params
-          use_fuzzy: true
-          parallel: false
+          use_fuzzy: True
+          parallel: False
           lambda_T: 0.1
           lambda_O: 0.05
           hyperparameter_update_method: "static"
@@ -134,23 +135,25 @@ experiments:
 
       - name: "Fuzzy_Adaptive_EM"
         class: "FuzzyPOMDP"
+        active: True
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "adaptive"
           integration_method: "montecarlo"
-          alpha_ah: 1
-          lambda_T: 0.15
-          lambda_O: 0.075
+          alpha_ah: 0.1
+          lambda_T: 0.1
+          lambda_O: 0.05
 
-#      - name: "Fuzzy_EB_EM"
-#        class: "FuzzyPOMDP"
-#        params:
-#          <<: *default_fuzzy_params
-#          hyperparameter_update_method: "empirical_bayes"
-#          integration_method: "mean"
-#          eb_learning_rate: 0.005
-#          lambda_T: 0.1
-#          lambda_O: 0.05
+      - name: "Fuzzy_EB_EM"
+        class: "FuzzyPOMDP"
+        active: False
+        params:
+          <<: *default_fuzzy_params
+          hyperparameter_update_method: "empirical_bayes"
+          integration_method: "montecarlo"
+          eb_learning_rate: 0.0001
+          lambda_T: 0.1
+          lambda_O: 0.05
 
 variable_mappings:
   test_result: 0
