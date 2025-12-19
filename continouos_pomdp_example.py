@@ -3,7 +3,7 @@ import random
 import pomdp_py
 from pomdp_py import ObservationModel, Agent, Environment, POMDP
 import numpy as np
-from scipy.stats import beta, norm, uniform, multivariate_normal
+from scipy.stats import beta, mvn, uniform, multivariate_normal
 import pandas as pd
 
 import seaborn as sns
@@ -58,7 +58,7 @@ DEFAULT_TRANS_PARAMS = {
 
 
 class ContinuousObservationModel(ObservationModel):
-    _DIST_MAP = ["beta", "norm", "uniform"]
+    _DIST_MAP = ["beta", "mvn", "uniform"]
 
     def __init__(self, states, actions, obs_params=None, distribution="beta", *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -97,9 +97,10 @@ class ContinuousObservationModel(ObservationModel):
                 elif self.distribution == "uniform":
                     low, high = p
                     samples.append(uniform.rvs(loc=low, scale=(high - low)))
-        elif self.distribution == "norm":
+        elif self.distribution == "mvn":
             loc, scale = dims.items()
-            samples.append(multivariate_normal.rvs(mean=loc[1], cov=scale[1]))
+            samples = multivariate_normal.rvs(mean=loc[1], cov=scale[1])
+            samples = samples.clip(0, 1)
         else:
             raise ValueError(f"Distribuzione non supportata: {self.distribution}")
         return np.asarray(samples)
@@ -113,9 +114,9 @@ class ContinuousObservationModel(ObservationModel):
             if self.distribution == "beta":
                 a, b = p
                 prob *= beta.pdf(x, a, b)
-            elif self.distribution == "norm":
+            elif self.distribution == "mvn":
                 loc, scale = p
-                prob *= norm.pdf(x, loc=loc, scale=scale)
+                prob *= mvn.pdf(x, loc=loc, scale=scale)
             elif self.distribution == "uniform":
                 low, high = p
                 prob *= uniform.pdf(x, loc=low, scale=(high - low))
@@ -137,41 +138,55 @@ class ContinuousObservationModel(ObservationModel):
         colors = [cmap(i / max(1, len(self.states) - 1)) for i in range(len(self.states))]
 
         for col, state in enumerate(self.states):
+            state_name = state.name
             axs[0, col].set_title(f"{state_name}")
 
-            state_name = state.name
             index = 0
-            for dim, p in self.params[state_name]:
-                _obs_x = np.linspace(-5, 5, 5000)
-                _obs_y = None
-                if self.distribution == "beta":
-                    a, b = p
-                    _obs_y = beta.pdf(_obs_x, a, b)
-                elif self.distribution == "norm":
-                    loc, scale = p
-                    _obs_y = norm.pdf(_obs_x, loc, scale)
-                elif self.distribution == "uniform":
-                    low, high = p
-                    _obs_y = uniform.pdf(_obs_x, low, high)
+            if self.distribution == "mvn":
+                # For MVN, plot joint distribution
+                mean, cov = self.params[state_name]["mean"], self.params[state_name]["cov"]
 
-                # Plot test results distribution (first row)
-                axs[index, col].plot(_obs_x, _obs_y, color=colors[col])
-                axs[index, col].set_title(f"{state_name}")
-                axs[index, col].set_xlabel(dim)
-                axs[index, col].set_ylabel("Density")
+                # Create a grid of points
+                x = np.linspace(0, 1, 100)
+                y = np.linspace(0, 1, 100)
+                X, Y = np.meshgrid(x, y)
+                pos = np.dstack((X, Y))
 
-                index += 1
+                # Compute the PDF
+                rv = multivariate_normal(mean, cov)
+                Z = rv.pdf(pos)
+
+                # Plot the contour
+                axs[0, col].contourf(X, Y, Z, levels=50, cmap='viridis')
+                axs[0, col].set_xlabel("Test Result")
+                axs[0, col].set_ylabel("Symptoms")
+                index += 1  # Skip the next row since we plotted joint distribution
+            else:
+                for dim, p in self.params[state_name]:
+                    _obs_x = np.linspace(-5, 5, 5000)
+                    _obs_y = None
+                    if self.distribution == "beta":
+                        a, b = p
+                        _obs_y = beta.pdf(_obs_x, a, b)
+                    elif self.distribution == "mvn":
+                        loc, scale = p
+                        _obs_y = mvn.pdf(_obs_x, loc, scale)
+                    elif self.distribution == "uniform":
+                        low, high = p
+                        _obs_y = uniform.pdf(_obs_x, low, high)
+
+                    # Plot test results distribution (first row)
+                    axs[index, col].plot(_obs_x, _obs_y, color=colors[col])
+                    axs[index, col].set_title(f"{state_name}")
+                    axs[index, col].set_xlabel(dim)
+                    axs[index, col].set_ylabel("Density")
+
+                    index += 1
 
                 # Plot symptoms distribution (second row)
 
         plt.tight_layout()
         plt.show()
-
-        a_t, b_t, a_s, b_s = self.params["sick"]
-        x_test = np.linspace(0, 1, 100)
-        y_test = beta.pdf(x_test, a_t, b_t)
-        plt.plot(x_test, y_test, label='Test Result', color='blue')
-        plt.savefig("sick_test_distribution.png")
 
     def _get_colors(self):
         num_states = len(self.states)
@@ -214,9 +229,9 @@ class ContinuousObservationModel(ObservationModel):
                     if self.distribution == "beta":
                         a, b = p
                         _obs_y = beta.pdf(_obs_X, a, b)
-                    elif self.distribution == "norm":
+                    elif self.distribution == "mvn":
                         loc, scale = p
-                        _obs_y = norm.pdf(_obs_X, loc, scale)
+                        _obs_y = mvn.pdf(_obs_X, loc, scale)
                     elif self.distribution == "uniform":
                         low, high = p
                         _obs_y = uniform.pdf(_obs_X, low, high)
@@ -278,7 +293,7 @@ def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd=0.01, seed=N
 
             # Get observation with noise
             observation = pomdp.agent.observation_model.sample(pomdp.env.state, action)
-            noise = np.random.normal(0, noise_sd, size=len(observation))
+            noise = np.random.mvnal(0, noise_sd, size=len(observation))
             noisy_observation = np.clip(observation + noise, 0, 1)
             traj_observations.append(noisy_observation)
 
@@ -397,10 +412,10 @@ def predict_next_observation_reward(fuzzy_model, current_observation, action):
         # Get outputs
         next_test_val = fuzzy_model.prediction.output['next_test']
         next_symptom_val = fuzzy_model.prediction.output['next_symptoms']
-        normalized_reward = fuzzy_model.prediction.output['reward']
+        mvnalized_reward = fuzzy_model.prediction.output['reward']
 
-        # Denormalize reward
-        reward_val = normalized_reward * (fuzzy_model.reward_max - fuzzy_model.reward_min) + fuzzy_model.reward_min
+        # Demvnalize reward
+        reward_val = mvnalized_reward * (fuzzy_model.reward_max - fuzzy_model.reward_min) + fuzzy_model.reward_min
 
     return np.array([next_test_val, next_symptom_val]), reward_val
 
