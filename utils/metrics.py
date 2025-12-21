@@ -1,6 +1,9 @@
 import numpy as np
+import pandas as pd
 from scipy.optimize import linear_sum_assignment
 from scipy.stats import multivariate_normal
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def _from_beta_to_multivariate_normal(obs_model_real, state_name):
@@ -188,3 +191,96 @@ def compute_error_metrics(learned_model, true_transitions, true_observations, st
         "perm_map": perm_map,
         "perm_ord": perm_ord
     }
+
+
+def visualize_L1_trials(results):
+    plt.figure(figsize=(10, 6))
+    plot_data = []
+
+    for model_name, trials in results.items():
+        for trial in trials:
+            plot_data.append({
+                'Model': model_name,
+                'Data Size': trial['data_size'],
+                'L1 Error': trial['metrics']['avg_l1_error'],
+            })
+
+    df = pd.DataFrame(plot_data)
+
+    sns.dark_palette("seagreen")
+    sns.lineplot(
+        data=df,
+        x='Data Size',
+        y='L1 Error',
+        hue='Model',
+        marker='o',
+        style='Model',
+    )
+    plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
+    plt.xlabel('Data Size (Trajectories)')
+    plt.ylabel('Average L1 Error (Lower is Better)')
+    plt.grid(True, axis="y", linestyle='--', alpha=0.2)
+    plt.legend(title='Model Type')
+    plt.show()
+
+
+def visualize_KL_trials(results):
+    plt.figure(figsize=(10, 6))
+    plot_data = []
+
+    for model_name, trials in results.items():
+        for trial in trials:
+            KL_values = np.mean(trial['metrics']['final_kl'])
+            plot_data.append({
+                'Model': model_name,
+                'Data Size': trial['data_size'],
+                'L1 Error': KL_values,
+            })
+
+    df = pd.DataFrame(plot_data)
+
+    sns.dark_palette("seagreen")
+    sns.lineplot(
+        data=df,
+        x='Data Size',
+        y='L1 Error',
+        hue='Model',
+        marker='o',
+        style='Model',
+    )
+    plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
+    plt.xlabel('Data Size (Trajectories)')
+    plt.ylabel('Average L1 Error (Lower is Better)')
+    plt.grid(True, axis="y", linestyle='--', alpha=0.2)
+    plt.legend(title='Model Type')
+    plt.show()
+
+    def visualize_L1_trials(results):
+        plt.figure(figsize=(10, 6))
+        plot_data = []
+
+        for model_name, trials in results.items():
+            for trial in trials:
+                plot_data.append({
+                    'Model': model_name,
+                    'Data Size': trial['data_size'],
+                    'L1 Error': trial['metrics']['avg_l1_error'],
+                })
+
+        df = pd.DataFrame(plot_data)
+
+        sns.dark_palette("seagreen")
+        sns.lineplot(
+            data=df,
+            x='Data Size',
+            y='L1 Error',
+            hue='Model',
+            marker='o',
+            style='Model',
+        )
+        plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
+        plt.xlabel('Data Size (Trajectories)')
+        plt.ylabel('Average L1 Error (Lower is Better)')
+        plt.grid(True, axis="y", linestyle='--', alpha=0.2)
+        plt.legend(title='Model Type')
+        plt.show()
