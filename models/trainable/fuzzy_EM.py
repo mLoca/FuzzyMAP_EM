@@ -63,7 +63,7 @@ class FuzzyPOMDP(PomdpEM):
         self.use_fuzzy = use_fuzzy
         self.lambda_T = np.ones(self.n_states) * lambda_T  # weight parameter for pseudo-counts
         self.lambda_O = np.ones(self.n_states) * lambda_O  # weight parameter for pseudo-counts in observation model
-        self.epsilon_prior = 1e-8
+        self.epsilon_prior = 1e-3
         self.fix_transitions = fix_transitions
         self.fix_observations = fix_observations
         self.fixed_observation_states = fixed_observation_states if fixed_observation_states is not None else []
@@ -327,7 +327,9 @@ class FuzzyPOMDP(PomdpEM):
 
         # Transitions
         if self.fix_transitions is None:
-            num = emp_N_T + fuzzy_N_T * self.lambda_T[:]
+            lambda_T_reshaped = self.lambda_T[:, None, None]
+
+            num = emp_N_T + fuzzy_N_T * lambda_T_reshaped
             den = np.sum(num, axis=2, keepdims=True)
             den[den == 0] = 1.0  # To avoid division by zero
             self.transitions = num / den
@@ -409,6 +411,8 @@ class FuzzyPOMDP(PomdpEM):
         return log_likelihood
 
     def _update_hyperparameters_adaptive(self, curr_T_counts, curr_O_counts, n_sequences):
+        VOLATILITY_THRESHOLD = 0
+
         if self.improvement < 0:
             if self.prev_fuzzy_counts_T is None or self.prev_fuzzy_counts_O is None:
                 self.prev_fuzzy_counts_T = curr_T_counts
@@ -419,29 +423,29 @@ class FuzzyPOMDP(PomdpEM):
                     # Transitions
                     delta_T = np.abs(curr_T_counts - self.prev_fuzzy_counts_T)
                     D_s_T = np.mean(delta_T)
-
                     sigma_data = np.trace(self.obs_covs[s]) + 1e-6
+                    normalized_volatility_T = (D_s_T / sigma_data)
 
-                    decay_T = 1.0 / (1.0 + self.alpha_ah * (D_s_T / sigma_data * np.sqrt(n_sequences)))
+
+                    decay_T = 1.0 / (1.0 + self.alpha_ah * normalized_volatility_T)
                     # Observations
                     # We use the fuzzy_O denominators as counts
                     delta_O = np.abs(curr_O_counts - self.prev_fuzzy_counts_O)
                     D_s_O = np.mean(delta_O)
 
-                    sigma_data = np.trace(self.obs_covs[s]) + 1e-6
-
-                    decay_O = 1.0 / (1.0 + self.alpha_ah * (D_s_O / sigma_data))
-                    if decay_T < 0.995:
+                    normalized_volatility_O = (D_s_O / sigma_data)
+                    decay_O = 1.0 / (1.0 + self.alpha_ah * normalized_volatility_O)
+                    if normalized_volatility_T > VOLATILITY_THRESHOLD:
                         self.lambda_T[s] = max(self.lambda_T[s] * decay_T, self.lambda_min)
-                    if decay_O < 0.995:
+                    if normalized_volatility_O > VOLATILITY_THRESHOLD:
                         self.lambda_O[s] = max(self.lambda_O[s] * decay_O, self.lambda_min)
                     if self.verbose:
                         print(
                             f"Adaptive Update: Lambda_T: {np.array2string(self.lambda_T, precision=4, separator=', ')},"
                             f" Lambda_O:{np.array2string(self.lambda_O, precision=8, separator=', ')}")
 
-        self.prev_fuzzy_counts_T = curr_T_counts
-        self.prev_fuzzy_counts_O = curr_O_counts
+            self.prev_fuzzy_counts_T = curr_T_counts
+            self.prev_fuzzy_counts_O = curr_O_counts
 
     def _empirical_bayes_transition(self, emp_N_T, fuzzy_N_T):
         """Empirical Bayes adaptation of lambda for transitions"""
@@ -453,7 +457,7 @@ class FuzzyPOMDP(PomdpEM):
                 n_emp = emp_N_T[s, a, :]
                 n_fuzzy = fuzzy_N_T[s, a, :]
 
-                alpha_prior = n_fuzzy + 1
+                alpha_prior = self.lambda_T[s] * n_fuzzy + 1
                 beta_post = n_emp + alpha_prior
 
                 sum_alpha = np.sum(alpha_prior)
@@ -487,19 +491,19 @@ class FuzzyPOMDP(PomdpEM):
             #Parameters of the Normal-Inverse-Wishart prior
             mu_0 = sum_fuzzy / (n_fuzzy + self.epsilon_prior)
             kappa_0 = self.lambda_O[s] * n_fuzzy
-            nu_0 = self.lambda_O[s] * n_fuzzy + 1
+            nu_0 = self.lambda_O[s] * n_fuzzy + self.obs_dim + 1
             psi_fuzzy = sum_sq_fuzzy - n_fuzzy * np.outer(mu_0, mu_0)
             psi_0 = psi_fuzzy * self.lambda_O[s] + self.epsilon_prior * np.eye(self.obs_dim)
 
             mu_data = sum_emp / (n_emp + self.epsilon_prior)
-            psi_data = sum_sq_emp - (sum_emp * sum_emp.T / n_emp)
+            psi_data = sum_sq_emp - (np.outer(sum_emp, sum_emp) / n_emp)
             diff_mu_data_0 = mu_data - mu_0
 
             # Parameters of the Normal-Inverse-Wishart posterior
             kappa_n = kappa_0 + n_emp
             nu_n = nu_0 + n_emp
             mu_n = (kappa_0 * mu_0 + n_emp * mu_data) / (kappa_0 + n_emp)
-            psi_n = psi_0 + psi_data + (kappa_0 * n_emp) / (kappa_0 + n_emp) * (diff_mu_data_0) * (diff_mu_data_0.T)
+            psi_n = psi_0 + psi_data + (kappa_0 * n_emp) / (kappa_0 + n_emp) * np.outer(diff_mu_data_0, diff_mu_data_0)
 
             # Gradient computation
 
@@ -521,9 +525,10 @@ class FuzzyPOMDP(PomdpEM):
 
             term_3 = (nu_0 * self.obs_dim) / (2 * self.lambda_O[s])
 
-            diff_mu_mul = (diff_mu_data_0) * (diff_mu_data_0.T)
+            diff_mu_mul = np.outer(diff_mu_data_0, diff_mu_data_0)
             scalar_factor = ((n_emp ** 2 * n_fuzzy) / kappa_n ** 2)
-            term_4 = - (nu_n / 2) * np.trace(inv_psi_n @ ((psi_fuzzy + scalar_factor) * diff_mu_mul))
+            matrix_term = (psi_fuzzy + scalar_factor * diff_mu_mul)
+            term_4 = - (nu_n / 2) * np.trace(inv_psi_n @ matrix_term)
 
             grad_lambda_O[s] = term_1 + term_2 + term_3 + term_4
 
@@ -549,7 +554,7 @@ class FuzzyPOMDP(PomdpEM):
         psi_0 = psi_fuzzy * self.lambda_O[state] + self.epsilon_prior * np.eye(self.obs_dim)
 
         mu_data = sum_emp / (n_emp + self.epsilon_prior)
-        psi_data = sum_sq_emp - (np.outer(mu_data, mu_data) / n_emp)
+        psi_data = sum_sq_emp - (np.outer(sum_emp, sum_emp) / n_emp)
 
         nu_n = nu_0 + n_emp
         psi_n = psi_0 + psi_data + (kappa_0 * n_emp) / (kappa_0 + n_emp) * np.outer(mu_data - mu_0, mu_data - mu_0)
