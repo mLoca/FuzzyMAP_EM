@@ -21,13 +21,68 @@ environments:
     true_observations:
       - healthy:
           mean: [ 0.2, 0.2]
-          cov: [[ 0.03, 0.001], [ 0.001, 0.03 ]]
+          cov: [[ 0.02, 0.001], [ 0.001, 0.02 ]]
         sick:
-          mean: [ 0.4, 0.80]
-          cov: [[ 0.04, 0.001 ], [ 0.001, 0.07 ]]
+          mean: [ 0.5, 0.80]
+          cov: [[ 0.025, 0.001 ], [ 0.001, 0.04 ]]
         critical:
           mean: [ 0.8, 0.8]
-          cov: [[ 0.03, 0.001 ], [ 0.001, 0.03 ]]
+          cov: [[ 0.025, 0.001 ], [ 0.001, 0.025]]
+
+  - name: "env_medium_healthcare_mvn"
+    n_states: 3
+    n_actions: 2
+    obs_dim: 2
+    states: [ "healthy", "sick",  "critical" ]
+    observations: [ "test_result", "symptoms" ]
+    actions: [ "wait", "treat" ]
+    distribution_type: "mvn"
+    true_transitions:
+      - [ [ 0.80, 0.15, 0.05 ], [ 0.75, 0.15, 0.10 ] ]
+      - [ [ 0.30, 0.60, 0.10 ], [ 0.60, 0.30, 0.10 ] ]
+      - [ [ 0.05, 0.05, 0.90 ], [ 0.10, 0.65, 0.25 ] ]
+    true_observations:
+      - healthy:
+          # Beta(2, 10) -> Mean: 0.17, Var: 0.011
+          mean: [ 0.17, 0.17 ]
+          cov: [ [ 0.011, 0.001 ], [ 0.001, 0.011 ] ]
+        sick:
+          # Beta(7, 7) -> Mean: 0.50, Var: 0.017
+          mean: [ 0.50, 0.50 ]
+          cov: [ [ 0.017, 0.001 ], [ 0.001, 0.017 ] ]
+        critical:
+          # Beta(10, 2) -> Mean: 0.83, Var: 0.011
+          # Beta(10, 2.5) -> Mean: 0.80, Var: 0.012
+          mean: [ 0.83, 0.80 ]
+          cov: [ [ 0.011, 0.001 ], [ 0.001, 0.012 ] ]
+
+  - name: "env_hard_healthcare_mvn"
+    n_states: 3
+    n_actions: 2
+    obs_dim: 2
+    states: [ "healthy", "sick",  "critical" ]
+    observations: [ "test_result", "symptoms" ]
+    actions: [ "wait", "treat" ]
+    distribution_type: "mvn"
+    true_transitions:
+      - [ [ 0.75, 0.20, 0.05 ], [ 0.70, 0.25, 0.05 ] ]
+      - [ [ 0.20, 0.70, 0.10 ], [ 0.55, 0.40, 0.05 ] ]
+      - [ [ 0.10, 0.15, 0.75 ], [ 0.20, 0.55, 0.25 ] ]
+    true_observations:
+      - healthy:
+          # Beta(2, 6) -> Mean: 0.25, Var: 0.021
+          mean: [ 0.22, 0.22 ]
+          cov: [ [ 0.021, 0.001 ], [ 0.001, 0.021 ] ]
+        sick:
+          # Beta(2.8, 4.0) -> Mean: 0.41, Var: 0.031
+          # Beta(7, 3) -> Mean: 0.70, Var: 0.019
+          mean: [ 0.41, 0.65 ]
+          cov: [ [ 0.031, 0.001 ], [ 0.001, 0.019 ] ]
+        critical:
+          # Beta(6, 2.0) -> Mean: 0.75, Var: 0.021
+          # Beta(6, 2) -> Mean: 0.75, Var: 0.021
+          mean: [ 0.78, 0.78 ]
+          cov: [ [ 0.021, 0.001 ], [ 0.001, 0.021 ] ]
 
   - name: "env_standard_healthcare"
     n_states: 3
@@ -102,16 +157,16 @@ experiments:
   data_efficiency_study:
     active: true
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
-    environments: ["env_standard_healthcare_mvn"]
+    environments: ["env_standard_healthcare_mvn", "env_medium_healthcare_mvn" , "env_hard_healthcare_mvn"]
     sequence_length: 3
 
-    dataset_sizes: [10, 15, 20, 30, 50]
+    dataset_sizes: [10, 15, 20]
     noise_level: [0.01]
     n_trials: 1
 
     standard_params:
-        n_iterations: 500
-        tolerance: 1e-5
+        n_iterations: 560
+        tolerance: 1e-6
         init_method: "random"
 
     models:
@@ -123,14 +178,14 @@ experiments:
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
-        active: False
+        active: True
         params: &default_fuzzy_params
           use_fuzzy: True
           parallel: False
           lambda_T: 0.1
           lambda_O: 0.05
           hyperparameter_update_method: "static"
-          integration_method: "montecarlo"
+          integration_method: "mean"
           mc_samples: 150
 
       - name: "Fuzzy_Adaptive_EM"
@@ -139,21 +194,21 @@ experiments:
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "adaptive"
-          integration_method: "montecarlo"
+          integration_method: "mean"
           alpha_ah: 0.1
-          lambda_T: 0.1
-          lambda_O: 0.05
+          lambda_T: 0.15
+          lambda_O: 0.075
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
-        active: False
+        active: True
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "empirical_bayes"
-          integration_method: "montecarlo"
+          integration_method: "mean"
           eb_learning_rate: 0.0001
-          lambda_T: 0.1
-          lambda_O: 0.05
+          lambda_T: 0.15
+          lambda_O: 0.075
 
 variable_mappings:
   test_result: 0
