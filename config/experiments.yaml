@@ -15,19 +15,19 @@ environments:
     actions: [ "wait", "treat" ]
     distribution_type: "mvn"
     true_transitions:
-      - [[0.90, 0.05, 0.05], [0.80, 0.10, 0.10]]
+      - [[0.90, 0.10, 0.00], [0.80, 0.15, 0.05]]
       - [[0.30, 0.65, 0.05], [0.60, 0.35, 0.05]]
-      - [[0.05, 0.05, 0.90], [0.15, 0.60, 0.25]]
+      - [[0.00, 0.10, 0.90], [0.15, 0.60, 0.25]]
     true_observations:
       - healthy:
-          mean: [ 0.2, 0.2]
-          cov: [[ 0.02, 0.001], [ 0.001, 0.02 ]]
+          mean: [ 0.18, 0.18]
+          cov: [[ 0.01, 0.0001], [ 0.0001, 0.01 ]]
         sick:
           mean: [ 0.5, 0.80]
-          cov: [[ 0.025, 0.001 ], [ 0.001, 0.04 ]]
+          cov: [[ 0.025, 0.0001 ], [ 0.0001, 0.025]]
         critical:
           mean: [ 0.8, 0.8]
-          cov: [[ 0.025, 0.001 ], [ 0.001, 0.025]]
+          cov: [[ 0.01, 0.0001 ], [ 0.0001, 0.01]]
 
   - name: "env_medium_healthcare_mvn"
     n_states: 3
@@ -76,8 +76,8 @@ environments:
         sick:
           # Beta(2.8, 4.0) -> Mean: 0.41, Var: 0.031
           # Beta(7, 3) -> Mean: 0.70, Var: 0.019
-          mean: [ 0.41, 0.65 ]
-          cov: [ [ 0.031, 0.001 ], [ 0.001, 0.019 ] ]
+          mean: [ 0.44, 0.65 ]
+          cov: [ [ 0.025, 0.001 ], [ 0.001, 0.019 ] ]
         critical:
           # Beta(6, 2.0) -> Mean: 0.75, Var: 0.021
           # Beta(6, 2) -> Mean: 0.75, Var: 0.021
@@ -157,12 +157,12 @@ experiments:
   data_efficiency_study:
     active: true
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
-    environments: ["env_standard_healthcare_mvn", "env_medium_healthcare_mvn" , "env_hard_healthcare_mvn"]
+    environments: ["env_standard_healthcare_mvn"]
     sequence_length: 3
 
-    dataset_sizes: [10, 15, 20]
+    dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
     noise_level: [0.01]
-    n_trials: 1
+    n_trials: 15
 
     standard_params:
         n_iterations: 560
@@ -173,12 +173,27 @@ experiments:
       - name: "Standard_EM"
         class: "PomdpEM"
         active: True
+        color: "blue"
+        marker: "o"
         params:
           parallel: False
+
+#      - name: "MAP_Uninformative_EM"
+#        class: "PomdpMAPEM"
+#        active: True
+#        params:
+#          parallel: False
+#          prior_alpha: 1.01
+#          prior_mu0: 0.5
+#          prior_kappa0: 1e-4
+#          prior_psi0: 1e-4
+#          prior_nu0: None
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
         active: True
+        color: "red"
+        marker: "s"
         params: &default_fuzzy_params
           use_fuzzy: True
           parallel: False
@@ -191,6 +206,8 @@ experiments:
       - name: "Fuzzy_Adaptive_EM"
         class: "FuzzyPOMDP"
         active: True
+        color: "green"
+        marker: "D"
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "adaptive"
@@ -202,6 +219,8 @@ experiments:
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
         active: True
+        color: "cyan"
+        marker: "^"
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "empirical_bayes"
