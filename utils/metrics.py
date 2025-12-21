@@ -206,20 +206,19 @@ def visualize_L1_trials(results):
             })
 
     df = pd.DataFrame(plot_data)
-
-    sns.dark_palette("seagreen")
+    sns.set_theme()
     sns.lineplot(
         data=df,
         x='Data Size',
         y='L1 Error',
         hue='Model',
         marker='o',
-        style='Model',
+        style='Model'
     )
     plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
     plt.xlabel('Data Size (Trajectories)')
     plt.ylabel('Average L1 Error (Lower is Better)')
-    plt.grid(True, axis="y", linestyle='--', alpha=0.2)
+    plt.grid(linestyle='--', alpha=0.2)
     plt.legend(title='Model Type')
     plt.show()
 
@@ -239,7 +238,7 @@ def visualize_KL_trials(results):
 
     df = pd.DataFrame(plot_data)
 
-    sns.dark_palette("seagreen")
+    sns.set_theme()
     sns.lineplot(
         data=df,
         x='Data Size',
@@ -248,39 +247,11 @@ def visualize_KL_trials(results):
         marker='o',
         style='Model',
     )
-    plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
+    plt.ylim([0, 20])
+    plt.title('Impact of Data Size on KL Divergence')
     plt.xlabel('Data Size (Trajectories)')
-    plt.ylabel('Average L1 Error (Lower is Better)')
-    plt.grid(True, axis="y", linestyle='--', alpha=0.2)
+    plt.ylabel('Average KL divergence (Lower is Better)')
+    plt.grid(linestyle='--', alpha=0.2)
     plt.legend(title='Model Type')
     plt.show()
 
-    def visualize_L1_trials(results):
-        plt.figure(figsize=(10, 6))
-        plot_data = []
-
-        for model_name, trials in results.items():
-            for trial in trials:
-                plot_data.append({
-                    'Model': model_name,
-                    'Data Size': trial['data_size'],
-                    'L1 Error': trial['metrics']['avg_l1_error'],
-                })
-
-        df = pd.DataFrame(plot_data)
-
-        sns.dark_palette("seagreen")
-        sns.lineplot(
-            data=df,
-            x='Data Size',
-            y='L1 Error',
-            hue='Model',
-            marker='o',
-            style='Model',
-        )
-        plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
-        plt.xlabel('Data Size (Trajectories)')
-        plt.ylabel('Average L1 Error (Lower is Better)')
-        plt.grid(True, axis="y", linestyle='--', alpha=0.2)
-        plt.legend(title='Model Type')
-        plt.show()
