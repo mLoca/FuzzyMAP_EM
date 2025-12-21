@@ -23,7 +23,7 @@ from fuzzy.fuzzy_model import create_continuous_medical_pomdp, build_fuzzymodel
 
 from continouos_pomdp_example import ContinuousObservationModel
 from pomdp_example import *
-from utils.metrics import compute_error_metrics
+from utils.metrics import compute_error_metrics, visualize_L1_trials, visualize_KL_trials
 
 
 class SyntheticEnvironment:
@@ -194,7 +194,6 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
 
                 start_time = time.time()
                 #TODO: add the kmeans initialization if necessary
-
                 fit_ll = model.fit(obs, acts,
                                    max_iterations=standard_param["n_iterations"],
                                    tolerance=float(standard_param["tolerance"]))
@@ -233,8 +232,8 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
             except Exception as e:
                 print(f" Model {model_name} failed: {e}")
 
-    _visualize_comparison_observation_distributions(results_model, env.n_states,"",
-                                                       f"{data_size} Noise: {noise_sd}")
+    #_visualize_comparison_observation_distributions(results_model, env.n_states,"",
+    #                                                   f"{data_size} Noise: {noise_sd}")
     return results_batch
 
 def main():
@@ -319,6 +318,8 @@ def main():
         print(f"Experiment {exp_id}:")
         for env_name, model_results in env_results.items():
             print(f" Environment: {env_name}")
+            visualize_L1_trials(model_results)
+            visualize_KL_trials(model_results)
             for model_name, results in model_results.items():
                 print(f"  Model: {model_name}")
                 for res in results:
