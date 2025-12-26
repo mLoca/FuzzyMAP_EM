@@ -75,18 +75,22 @@ class PomdpMAPEM(PomdpEM):
 
         # Observations
         for s in range(self.n_states):
+            if emp_N_O[s] < 1e-10:
+                continue
+            emp_mean = emp_Sum_O[s] / emp_N_O[s]
+            scatter_matrix = emp_Sum_sq_O[s] - emp_N_O[s] * np.outer(emp_mean, emp_mean)
+            diff_means = emp_mean - self.prior_mu0
+
             kappa_n = self.prior_kappa0 + emp_N_O[s]
             nu_n = self.prior_nu0 + emp_N_O[s]
             mu_n = (self.prior_kappa0 * self.prior_mu0 + emp_Sum_O[s]) / kappa_n
-            psi_n = (self.prior_psi0 + emp_Sum_sq_O[s]
-                     + (self.prior_kappa0 * emp_N_O[s]) / (self.prior_kappa0 + emp_N_O[s]) *
-                     np.outer(emp_Sum_O[s] / emp_N_O[s] - self.prior_mu0,
-                              emp_Sum_O[s] / emp_N_O[s] - self.prior_mu0))
+            psi_n = (self.prior_psi0 + scatter_matrix
+                     + (self.prior_kappa0 * emp_N_O[s] / kappa_n) * np.outer(diff_means, diff_means))
 
             self.obs_means[s] = mu_n
 
             # Ensure covariance matrix is positive definite
-            self.obs_covs[s] = psi_n / (nu_n + self.obs_dim + 2)
+            self.obs_covs[s] = psi_n / (nu_n + self.obs_dim + 1)
 
         self.initial_prob = np.mean([g[0] for g in gammas], axis=0)
         return
