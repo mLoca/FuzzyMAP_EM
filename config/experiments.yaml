@@ -48,12 +48,12 @@ environments:
           cov: [ [ 0.011, 0.001 ], [ 0.001, 0.011 ] ]
         sick:
           # Beta(7, 7) -> Mean: 0.50, Var: 0.017
-          mean: [ 0.50, 0.50 ]
-          cov: [ [ 0.017, 0.001 ], [ 0.001, 0.017 ] ]
+          mean: [ 0.45, 0.55 ]
+          cov: [ [ 0.015, 0.001 ], [ 0.001, 0.015 ] ]
         critical:
           # Beta(10, 2) -> Mean: 0.83, Var: 0.011
           # Beta(10, 2.5) -> Mean: 0.80, Var: 0.012
-          mean: [ 0.83, 0.80 ]
+          mean: [ 0.81, 0.81 ]
           cov: [ [ 0.011, 0.001 ], [ 0.001, 0.012 ] ]
 
   - name: "env_hard_healthcare_mvn"
@@ -72,17 +72,17 @@ environments:
       - healthy:
           # Beta(2, 6) -> Mean: 0.25, Var: 0.021
           mean: [ 0.22, 0.22 ]
-          cov: [ [ 0.021, 0.001 ], [ 0.001, 0.021 ] ]
+          cov: [ [ 0.011, 0.001 ], [ 0.001, 0.011 ] ]
         sick:
           # Beta(2.8, 4.0) -> Mean: 0.41, Var: 0.031
           # Beta(7, 3) -> Mean: 0.70, Var: 0.019
-          mean: [ 0.44, 0.65 ]
-          cov: [ [ 0.025, 0.001 ], [ 0.001, 0.019 ] ]
+          mean: [ 0.50, 0.50 ]
+          cov: [ [ 0.02, 0.001 ], [ 0.001, 0.2 ] ]
         critical:
           # Beta(6, 2.0) -> Mean: 0.75, Var: 0.021
           # Beta(6, 2) -> Mean: 0.75, Var: 0.021
           mean: [ 0.78, 0.78 ]
-          cov: [ [ 0.021, 0.001 ], [ 0.001, 0.021 ] ]
+          cov: [ [ 0.011, 0.001 ], [ 0.001, 0.011 ] ]
 
   - name: "env_standard_healthcare"
     n_states: 3
@@ -157,12 +157,12 @@ experiments:
   data_efficiency_study:
     active: true
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
-    environments: ["env_standard_healthcare_mvn"]
+    environments: ["env_standard_healthcare_mvn", "env_medium_healthcare_mvn", "env_hard_healthcare_mvn"]
     sequence_length: 3
 
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
     noise_level: [0.01]
-    n_trials: 15
+    n_trials: 20
 
     standard_params:
         n_iterations: 560
@@ -213,8 +213,8 @@ experiments:
           hyperparameter_update_method: "adaptive"
           integration_method: "mean"
           alpha_ah: 0.1
-          lambda_T: 0.15
-          lambda_O: 0.075
+          lambda_T: 0.2
+          lambda_O: 0.01
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
@@ -226,8 +226,8 @@ experiments:
           hyperparameter_update_method: "empirical_bayes"
           integration_method: "mean"
           eb_learning_rate: 0.0001
-          lambda_T: 0.15
-          lambda_O: 0.075
+          lambda_T: 0.1
+          lambda_O: 0.05
 
 variable_mappings:
   test_result: 0

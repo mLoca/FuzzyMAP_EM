@@ -13,7 +13,7 @@ def collect_data(
         trials: int = 1000,
         horizon: int = 3,
         pomdp=None,
-        target_per_state: int = 950,
+        target_per_state: int = 130,
 ):
     """
     Raccoglie dati con massimo `trials` episodi ma cerca di ottenere almeno
@@ -187,7 +187,7 @@ def build_fuzzymodel(pomdp=None, seed=42):
     random.seed(seed)
 
     nr_clus = 5
-    df = collect_data(trials=1000, horizon=3, pomdp=pomdp)
+    df = collect_data(trials=200, horizon=3, pomdp=pomdp)
     df["action"] = df["action"].astype("category")
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
