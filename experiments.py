@@ -17,6 +17,7 @@ from pomdp_py import Agent, Environment
 import utils.utils as utils
 
 from models.trainable.pomdp_EM import PomdpEM
+from models.trainable.pomdp_MAP_EM import PomdpMAPEM
 from models.trainable.fuzzy_EM import FuzzyPOMDP, evaluate_fuzzy_reward_prediction, \
     visualize_observation_distributions, _visualize_comparison_observation_distributions
 from fuzzy.fuzzy_model import create_continuous_medical_pomdp, build_fuzzymodel
@@ -186,6 +187,13 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
                                        seed=seed,
                                        fuzzy_model=fuzzy_model,
                                        **params)
+                elif model_cls == "PomdpMAPEM":
+                    model = PomdpMAPEM(n_states=env.n_states,
+                                       n_actions=env.n_actions,
+                                       obs_dim=env.obs_dim,
+                                       verbose=verbose,
+                                       seed=seed,
+                                       **params)
                 else:
                     raise ValueError(f"Unknown model class: {model_cls}")
 
@@ -297,7 +305,7 @@ def main():
                         results_summary[exp_id][env_name][m_name] = []
                     results_summary[exp_id][env_name][m_name].append(res)
         else:
-            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 10)) as executor:
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 20)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
