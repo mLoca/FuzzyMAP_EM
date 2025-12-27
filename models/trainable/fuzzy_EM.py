@@ -63,7 +63,6 @@ class FuzzyPOMDP(PomdpEM):
         self.use_fuzzy = use_fuzzy
         self.lambda_T = np.ones(self.n_states) * lambda_T  # weight parameter for pseudo-counts
         self.lambda_O = np.ones(self.n_states) * lambda_O  # weight parameter for pseudo-counts in observation model
-        self.epsilon_prior = 1e-3
         self.fix_transitions = fix_transitions
         self.fix_observations = fix_observations
         self.fixed_observation_states = fixed_observation_states if fixed_observation_states is not None else []
@@ -340,7 +339,7 @@ class FuzzyPOMDP(PomdpEM):
                 continue
             if self.fix_observations is None:
                 den_O = emp_N_O[s] + self.lambda_O[s] * fuzzy_N_O[s] + self.epsilon_prior
-                mean_O = (emp_Sum_O[s] + self.lambda_O[s] * fuzzy_Sum_O[s]) / den_O
+                mean_O = (emp_Sum_O[s] + self.lambda_O[s] * fuzzy_Sum_O[s] + self.epsilon_prior) / den_O
                 self.obs_means[s] = mean_O
 
                 if self.use_fuzzy and self.hp_method != "empirical_bayes":
@@ -490,8 +489,8 @@ class FuzzyPOMDP(PomdpEM):
 
             #Parameters of the Normal-Inverse-Wishart prior
             mu_0 = sum_fuzzy / (n_fuzzy + self.epsilon_prior)
-            kappa_0 = self.lambda_O[s] * n_fuzzy
-            nu_0 = self.lambda_O[s] * n_fuzzy + self.obs_dim + 1
+            kappa_0 = self.lambda_O[s] * n_fuzzy + self.epsilon_prior
+            nu_0 = self.lambda_O[s] * n_fuzzy + self.obs_dim
             psi_fuzzy = sum_sq_fuzzy - n_fuzzy * np.outer(mu_0, mu_0)
             psi_0 = psi_fuzzy * self.lambda_O[s] + self.epsilon_prior * np.eye(self.obs_dim)
 
@@ -503,7 +502,7 @@ class FuzzyPOMDP(PomdpEM):
             kappa_n = kappa_0 + n_emp
             nu_n = nu_0 + n_emp
             mu_n = (kappa_0 * mu_0 + n_emp * mu_data) / (kappa_0 + n_emp)
-            psi_n = psi_0 + psi_data + (kappa_0 * n_emp) / (kappa_0 + n_emp) * np.outer(diff_mu_data_0, diff_mu_data_0)
+            psi_n = psi_0 + psi_data + ((kappa_0 * n_emp) / (kappa_0 + n_emp)) * np.outer(diff_mu_data_0, diff_mu_data_0)
 
             # Gradient computation
 
@@ -523,7 +522,7 @@ class FuzzyPOMDP(PomdpEM):
 
             term_2 = (self.obs_dim * n_emp * n_fuzzy) / (2 * kappa_0 * kappa_n)
 
-            term_3 = (nu_0 * self.obs_dim) / (2 * self.lambda_O[s])
+            term_3 = (nu_0 * self.obs_dim) / (2 * self.lambda_O[s] + + self.epsilon_prior)
 
             diff_mu_mul = np.outer(diff_mu_data_0, diff_mu_data_0)
             scalar_factor = ((n_emp ** 2 * n_fuzzy) / kappa_n ** 2)
@@ -533,7 +532,7 @@ class FuzzyPOMDP(PomdpEM):
             grad_lambda_O[s] = term_1 + term_2 + term_3 + term_4
 
         # Apply gradient ascent step
-        self.lambda_O += self.eb_lr * 1 / 10 * grad_lambda_O
+        self.lambda_O += self.eb_lr * 1/10 * grad_lambda_O
         self.lambda_O = np.maximum(self.lambda_O, 0)
 
     def _compute_cov_empirical_bayes(self, emp_N_O, emp_Sum_O, emp_Sum_sq_O,
@@ -548,18 +547,19 @@ class FuzzyPOMDP(PomdpEM):
         sum_sq_fuzzy = fuzzy_Sum_Sq_O[state]
 
         mu_0 = sum_fuzzy / (n_fuzzy + self.epsilon_prior)
-        kappa_0 = self.lambda_O[state] * n_fuzzy
-        nu_0 = self.lambda_O[state] * n_fuzzy + self.obs_dim + 1
+        kappa_0 = self.lambda_O[state] * n_fuzzy + self.epsilon_prior
+        nu_0 = self.lambda_O[state] * n_fuzzy + self.obs_dim
         psi_fuzzy = sum_sq_fuzzy - n_fuzzy * np.outer(mu_0, mu_0)
         psi_0 = psi_fuzzy * self.lambda_O[state] + self.epsilon_prior * np.eye(self.obs_dim)
 
         mu_data = sum_emp / (n_emp + self.epsilon_prior)
         psi_data = sum_sq_emp - (np.outer(sum_emp, sum_emp) / n_emp)
+        diff_mu_data_0 = mu_data - mu_0
 
         nu_n = nu_0 + n_emp
-        psi_n = psi_0 + psi_data + (kappa_0 * n_emp) / (kappa_0 + n_emp) * np.outer(mu_data - mu_0, mu_data - mu_0)
+        psi_n = psi_0 + psi_data + ((kappa_0 * n_emp) / (kappa_0 + n_emp)) * np.outer(diff_mu_data_0, diff_mu_data_0)
 
-        cov_matr = psi_n / (nu_n + self.obs_dim + 2)
+        cov_matr = psi_n / (nu_n + self.obs_dim + 1)
         return cov_matr
 
 
