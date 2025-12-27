@@ -42,6 +42,7 @@ class PomdpEM:
 
         self.verbose = verbose
         self.parallel = parallel
+        self.epsilon_prior = 1e-4
 
     def initialize_with_kmeans(self, observations):
         """
@@ -71,7 +72,7 @@ class PomdpEM:
         for t in range(T):
             for s in range(self.n_states):
                 cov = self.obs_covs[s]
-                cov = 0.5 * (cov + cov.T) + 1e-6 * np.eye(self.obs_dim)
+                cov = 0.5 * (cov + cov.T) + self.epsilon_prior * np.eye(self.obs_dim)
                 try:
                     # Batch computation for all t
                     obs_probs[:, s] = multivariate_normal.pdf(observations, mean=self.obs_means[s], cov=cov)
@@ -247,13 +248,13 @@ class PomdpEM:
         # Update means and covariances
         for s in range(self.n_states):
             if obs_counts[s] > 0:
-                total_weight = obs_counts[s] + 1e-10
+                total_weight = obs_counts[s] + self.epsilon_prior
                 self.obs_means[s] = new_means[s] / total_weight
                 # Update covariance
                 E_ooT_s = data_O_sum_gamma_obs_sq[s] / total_weight
                 mu_s_outer_mu_s = np.outer(self.obs_means[s, :], self.obs_means[s, :])
                 self.obs_covs[s, :, :] = E_ooT_s - mu_s_outer_mu_s
-                self.obs_covs[s, :, :] += 1e-8 * np.eye(self.obs_dim)  # Regularization
+                self.obs_covs[s, :, :] += self.epsilon_prior * np.eye(self.obs_dim)  # Regularization
 
         return
 
