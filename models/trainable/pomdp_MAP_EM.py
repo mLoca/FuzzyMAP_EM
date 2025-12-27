@@ -90,7 +90,8 @@ class PomdpMAPEM(PomdpEM):
             self.obs_means[s] = mu_n
 
             # Ensure covariance matrix is positive definite
-            self.obs_covs[s] = psi_n / (nu_n + self.obs_dim + 1)
+            self.obs_covs[s, :, :] = psi_n / (nu_n + self.obs_dim)
+            self.obs_covs[s, :, :] += self.epsilon_prior * np.eye(self.obs_dim)
 
         self.initial_prob = np.mean([g[0] for g in gammas], axis=0)
         return
