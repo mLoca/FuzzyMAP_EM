@@ -305,7 +305,7 @@ def main():
                         results_summary[exp_id][env_name][m_name] = []
                     results_summary[exp_id][env_name][m_name].append(res)
         else:
-            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 20)) as executor:
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 32)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
@@ -326,16 +326,28 @@ def main():
         print(f"Experiment {exp_id}:")
         for env_name, model_results in env_results.items():
             print(f" Environment: {env_name}")
-            visualize_L1_trials(model_results)
-            visualize_KL_trials(model_results)
-            for model_name, results in model_results.items():
-                print(f"  Model: {model_name}")
-                for res in results:
-                    print(f"   Data Size: {res['data_size']}, Seq Length: {res['sequence_length']}, "
-                          f"Noise SD: {res['noise_sd']}, Trial: {res['trial']}, "
-                          f"Final LL: {res['final_log_likelihood']:.2f}, "
-                          f"Training Time (s): {res['training_time_sec']:.2f}, "
-                          f"Metrics: {res['metrics']}")
+            noise_levels = sorted({res['noise_sd'] for results in model_results.values() for res in results})
+
+            for noise in noise_levels:
+                print(f"  Noise SD: {noise}")
+                filtered_results = {}
+                for model_name, results in model_results.items():
+                    filtered = [r for r in results if r['noise_sd'] == noise]
+                    if filtered:
+                        filtered_results[model_name] = filtered
+
+                visualize_L1_trials(filtered_results, title_suffix=f" Noise SD: {noise}")
+                visualize_KL_trials(filtered_results, title_suffix=f" Noise SD: {noise}")
+
+                # Stampa i risultati filtrati
+                for model_name, results in filtered_results.items():
+                    print(f"  Model: {model_name}")
+                    for res in results:
+                        print(f"   Data Size: {res['data_size']}, Seq Length: {res['sequence_length']}, "
+                              f"Noise SD: {res['noise_sd']}, Trial: {res['trial']}, "
+                              f"Final LL: {res['final_log_likelihood']:.2f}, "
+                              f"Training Time (s): {res['training_time_sec']:.2f}, "
+                              f"Metrics: {res['metrics']}")
 
 if __name__ == "__main__":
     main()

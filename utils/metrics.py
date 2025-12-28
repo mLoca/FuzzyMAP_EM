@@ -193,7 +193,7 @@ def compute_error_metrics(learned_model, true_transitions, true_observations, st
     }
 
 
-def visualize_L1_trials(results):
+def visualize_L1_trials(results, title_suffix=''):
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -215,7 +215,7 @@ def visualize_L1_trials(results):
         marker='o',
         style='Model'
     )
-    plt.title('Impact of Data Size on Model Reconstruction Error (L1)')
+    plt.title('Impact of Data Size on Transition Error (L1) - ' + title_suffix)
     plt.xlabel('Data Size (Trajectories)')
     plt.ylabel('Average L1 Error (Lower is Better)')
     plt.grid(linestyle='--', alpha=0.2)
@@ -223,7 +223,7 @@ def visualize_L1_trials(results):
     plt.show()
 
 
-def visualize_KL_trials(results):
+def visualize_KL_trials(results, title_suffix = ''):
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -248,7 +248,7 @@ def visualize_KL_trials(results):
         style='Model',
     )
     plt.ylim([0, 20])
-    plt.title('Impact of Data Size on KL Divergence')
+    plt.title('Impact of Data Size on KL Divergence - ' + title_suffix)
     plt.xlabel('Data Size (Trajectories)')
     plt.ylabel('Average KL divergence (Lower is Better)')
     plt.grid(linestyle='--', alpha=0.2)
