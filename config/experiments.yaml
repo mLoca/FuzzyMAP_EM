@@ -19,14 +19,14 @@ environments:
       - [[ 0.10, 0.15, 0.75 ], [ 0.20, 0.60, 0.20 ]]
     true_observations:
       - healthy:
-          mean: [ 0.15, 0.15 ]
-          cov: [[ 0.005, 0.0 ], [ 0.0, 0.005 ]]
+          mean: [ 0.20, 0.20 ]
+          cov: [[ 0.01, 0.0025 ], [0.0025, 0.01 ]]
         sick:
-          mean: [ 0.80, 0.30 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0, 0.007 ] ]
+          mean: [ 0.35, 0.80 ]
+          cov: [[ 0.02, 0.015 ], [ 0.015, 0.02 ] ]
         critical:
           mean: [ 0.80, 0.82 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0, 0.005 ] ]
+          cov: [ [ 0.011, 0.0 ], [ 0, 0.011 ] ]
   - name: "env_standard_healthcare_mvn_AA"
     n_states: 3
     n_actions: 2
@@ -64,14 +64,14 @@ environments:
       - [[0.10, 0.15, 0.75], [0.20, 0.55, 0.25]]
     true_observations:
       - healthy:
-          mean: [ 0.15, 0.15 ]
-          cov: [[ 0.005, 0.0 ], [ 0.0, 0.005 ]]
+          mean: [ 0.30, 0.30 ]
+          cov: [[0.01, 0.0025], [0.0025, 0.01]]
         sick:
-          mean: [ 0.80, 0.30 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0, 0.007 ] ]
+          mean: [0.50, 0.50]
+          cov: [[0.02, 0.0125], [0.0125, 0.02]]
         critical:
-          mean: [ 0.80, 0.82 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0, 0.005 ] ]
+          mean: [0.75, 0.70]
+          cov: [[0.01, 0.0], [0, 0.01]]
 
   - name: "env_hard_healthcare_mvn"
     n_states: 3
@@ -82,20 +82,20 @@ environments:
     actions: [ "wait", "treat" ]
     distribution_type: "mvn"
     true_transitions:
-      - [ [ 0.80, 0.15, 0.05 ], [ 0.70, 0.20, 0.10 ] ]
-      - [ [ 0.25, 0.65, 0.10 ], [ 0.60, 0.35, 0.05 ] ]
-      - [ [ 0.10, 0.15, 0.75 ], [ 0.20, 0.60, 0.20 ] ]
+      - [[ 0.80, 0.15, 0.05 ], [ 0.70, 0.20, 0.10 ]]
+      - [[ 0.25, 0.65, 0.10 ], [ 0.60, 0.35, 0.05 ]]
+      - [[ 0.10, 0.15, 0.75 ], [ 0.20, 0.60, 0.20 ]]
     true_observations:
       # Closer means, testing the limits of separability without clipping issues
       - healthy:
           mean: [ 0.30, 0.30 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0001, 0.007 ] ]
+          cov: [[0.007, 0.0], [0.0, 0.007]]
         sick:
-          mean: [ 0.70, 0.50 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0001, 0.007 ] ]
+          mean: [0.42, 0.45]
+          cov: [[0.02, 0.0125], [0.0125, 0.02]]
         critical:
-          mean: [ 0.5, 0.75 ]
-          cov: [ [ 0.007, 0.0 ], [ 0.0001, 0.007 ] ]
+          mean: [ 0.625, 0.75 ]
+          cov: [[0.011, 0.001], [0.001, 0.011]]
 
   - name: "env_standard_healthcare"
     n_states: 3
@@ -169,7 +169,7 @@ environments:
 
 experiments:
   data_efficiency_study:
-    active: true
+    active: False
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
     environments: ["env_standard_healthcare_mvn", "env_medium_healthcare_mvn", "env_hard_healthcare_mvn"]
     sequence_length: 3
@@ -242,6 +242,111 @@ experiments:
           lambda_T: 0.25
           lambda_O: 0.05
 
+  integration_method_comparison:
+    active: False
+    description: "Comparison between Mean and Monte Carlo integration methods in FuzzyPOMDP."
+    environments: [ "env_standard_healthcare_mvn", "env_medium_healthcare_mvn", "env_hard_healthcare_mvn"]
+    sequence_length: 3
+    dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
+    noise_level: [ 0.01, 0.1 ]
+    n_trials: 20
+    standard_params:
+      n_iterations: 500
+      tolerance: 1e-4
+      init_method: "random"
+    models:
+      - name: "Fuzzy_Mean"
+        class: "FuzzyPOMDP"
+        active: True
+        color: "blue"
+        marker: "o"
+        params:
+          use_fuzzy: True
+          parallel: False
+          lambda_T: 0.1
+          lambda_O: 0.05
+          hyperparameter_update_method: "static"
+          integration_method: "mean"
+
+      - name: "Fuzzy_MC_50"
+        class: "FuzzyPOMDP"
+        active: True
+        color: "red"
+        marker: "x"
+        params:
+          use_fuzzy: True
+          parallel: False
+          lambda_T: 0.1
+          lambda_O: 0.05
+          hyperparameter_update_method: "static"
+          integration_method: "montecarlo"
+          mc_samples: 50
+
+      - name: "Fuzzy_MC_200"
+        class: "FuzzyPOMDP"
+        active: True
+        color: "green"
+        marker: "^"
+        params:
+          use_fuzzy: True
+          parallel: False
+          lambda_T: 0.1
+          lambda_O: 0.05
+          hyperparameter_update_method: "static"
+          integration_method: "montecarlo"
+          mc_samples: 200
+  hyperparameter_grid_search:
+    active: True
+    description: "Grid Search for lambda."
+    environments: [ "env_hard_healthcare_mvn" ]
+    sequence_length: 3
+    dataset_sizes: [ 25 ]
+    noise_level: [ 0.01 ]
+    n_trials: 5
+    standard_params:
+      n_iterations: 400
+      tolerance: 1e-4
+      init_method: "random"
+    models:
+      - name: "Fuzzy_Grid_Search"
+        class: "FuzzyPOMDP"
+        active: True
+        grid_search: True
+        params:
+          use_fuzzy: True
+          parallel: False
+          hyperparameter_update_method: "static"
+          integration_method: "mean"
+          lambda_T: [0, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0 ]
+          lambda_O: [0, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0 ]
+  adaptive_alpha_search:
+      active: False
+      description: "Grid search for alpha_ah parameter using the Adaptive update method."
+      environments: ["env_standard_healthcare_mvn"]
+      sequence_length: 3
+      dataset_sizes: [25]
+      noise_level: [0.01]
+      n_trials: 45
+      standard_params:
+          n_iterations: 400
+          tolerance: 1e-4
+          init_method: "random"
+      models:
+        - name: "Fuzzy_Adaptive_Alpha"
+          class: "FuzzyPOMDP"
+          active: True
+          grid_search: True
+          params:
+            use_fuzzy: True
+            parallel: False
+            hyperparameter_update_method: "adaptive"
+            integration_method: "mean"
+
+
+            lambda_T: 0.30
+            lambda_O: 0.10
+
+            alpha_ah: [0.01, 0.05, 0.1, 0.15, 0.20, 0.35, 0.5, 0.75, 1.0]
 
 variable_mappings:
   test_result: 0
