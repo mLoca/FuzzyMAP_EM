@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
@@ -119,7 +121,7 @@ def match_state_hungarian(learned_model, true_transitions, true_observations, st
     cost_obs = np.zeros((n_states, n_states))
     for row in range(n_states):
         for col in range(n_states):
-            # Observation KL divergence: learned (row) vs true (col)
+            # Observation KL divergence: learned  vs true
             learned_obs_mvn = _mvn_definition_from_POMDP(learned_model, state=row)
             true_obs_mvn = _from_dist_to_mvn(true_observations, dist_type, state_name=states[col])
 
@@ -127,7 +129,7 @@ def match_state_hungarian(learned_model, true_transitions, true_observations, st
             KL_col_row = _compute_KL_divergence(true_obs_mvn, learned_obs_mvn)
             cost_obs[row, col] = 0.5 * (KL_row_col + KL_col_row)
 
-            # Transition L1 distance: learned (row) vs true (col)
+            # Transition L1 distance: learned vs true
             cost_trans[row, col] = np.sum(np.abs(learned_model.transitions[row] - true_transitions[col]))
 
     cost_trans = normalize_cost_matrix(cost_trans)
@@ -223,7 +225,8 @@ def visualize_L1_trials(results, title_suffix=''):
     plt.show()
 
 
-def visualize_KL_trials(results, title_suffix = ''):
+def visualize_KL_trials(results, title_suffix=''):
+    sns.set_theme(style="whitegrid", context="talk")
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -238,7 +241,7 @@ def visualize_KL_trials(results, title_suffix = ''):
 
     df = pd.DataFrame(plot_data)
 
-    sns.set_theme()
+    #sns.set_theme()
     sns.lineplot(
         data=df,
         x='Data Size',
@@ -247,11 +250,94 @@ def visualize_KL_trials(results, title_suffix = ''):
         marker='o',
         style='Model',
     )
+
+
     plt.ylim([0, 20])
     plt.title('Impact of Data Size on KL Divergence - ' + title_suffix)
     plt.xlabel('Data Size (Trajectories)')
     plt.ylabel('Average KL divergence (Lower is Better)')
-    plt.grid(linestyle='--', alpha=0.2)
+    plt.grid(linestyle='--', alpha=0.4)
     plt.legend(title='Model Type')
     plt.show()
 
+
+def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
+                             param1='lambda_T', param2='lambda_O',
+                             title="Hyperparameter Grid Search",
+                             vmax=None):
+    data = []
+    for model_name, trails in experiment_results.items():
+        p1_match = re.search(f"{param1}=([0-9.]+)", model_name)
+        p2_match = re.search(f"{param2}=([0-9.]+)", model_name)
+
+        val1 = float(p1_match.group(1))
+        val2 = float(p2_match.group(1))
+
+        values = []
+        for trail in trails:
+            metric_values = trail['metrics'][metric_key]
+            if np.ndim(metric_values) > 0:
+                values.append(np.mean(metric_values))
+            else:
+                values.append(metric_values)
+
+        avg_score = np.mean(values)
+        data.append({param1: val1, param2: val2, metric_key: avg_score})
+
+    df = pd.DataFrame(data)
+
+    # Sort the data numerically
+    df = df.sort_values(by=[param1, param2], ascending=[False, True])
+
+    # Pivot the table
+    pivot_table = df.pivot(index=param1, columns=param2, values=metric_key)
+
+    pivot_table.sort_index(axis=0, ascending=False, inplace=True)
+    pivot_table.sort_index(axis=1, ascending=True, inplace=True)
+
+    plt.figure(figsize=(10, 8))
+
+    # Plot
+    ax = sns.heatmap(pivot_table, annot=True, fmt=".2f", cmap="viridis_r",  vmax=vmax)
+
+    # Format the tick labels
+    ax.set_yticklabels([f"{y:.2f}" for y in pivot_table.index], rotation=0)
+    ax.set_xticklabels([f"{x:.2f}" for x in pivot_table.columns], rotation=45)
+
+    ax.set_ylabel(param1)
+    ax.set_xlabel(param2)
+
+    plt.title(title)
+    plt.savefig(metric_key+" - grid_search_heatmap.png")
+    plt.show()
+
+
+def plot_1d_sensitivity(experiment_results, param_name='alpha_ah',
+                        metric_key='kl_final',
+                        title="Parameter Sensitivity", vmax=None, vmin=0):
+    data = []
+
+    for model_name, trails in experiment_results.items():
+        p_match = re.search(f"{param_name}=([0-9.]+)", model_name)
+        alpha_val = p_match.group(1)
+
+        for trail in trails:
+            val = trail['metrics'][metric_key]
+            if np.ndim(val) > 0:
+                val = np.mean(val)
+
+            data.append({param_name: alpha_val, 'score': val})
+
+    df = pd.DataFrame(data)
+
+    plt.figure(figsize=(10, 6))
+
+    sns.lineplot(data=df, x=param_name, y='score', marker='o', linewidth=2)
+
+    plt.ylim([vmin, vmax if vmax is not None else df['score'].max() * 1.1])
+    plt.title(title)
+    plt.xlabel(param_name)
+    plt.ylabel(metric_key)
+    plt.tight_layout()
+    plt.savefig(metric_key + " - alpha_ah_sensitivity_plot.png")
+    plt.show()
