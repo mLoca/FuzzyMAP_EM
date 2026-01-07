@@ -121,7 +121,6 @@ def match_state_hungarian(learned_model, true_transitions, true_observations, st
     cost_obs = np.zeros((n_states, n_states))
     for row in range(n_states):
         for col in range(n_states):
-            # Observation KL divergence: learned  vs true
             learned_obs_mvn = _mvn_definition_from_POMDP(learned_model, state=row)
             true_obs_mvn = _from_dist_to_mvn(true_observations, dist_type, state_name=states[col])
 
@@ -129,7 +128,6 @@ def match_state_hungarian(learned_model, true_transitions, true_observations, st
             KL_col_row = _compute_KL_divergence(true_obs_mvn, learned_obs_mvn)
             cost_obs[row, col] = 0.5 * (KL_row_col + KL_col_row)
 
-            # Transition L1 distance: learned vs true
             cost_trans[row, col] = np.sum(np.abs(learned_model.transitions[row] - true_transitions[col]))
 
     cost_trans = normalize_cost_matrix(cost_trans)
@@ -195,7 +193,7 @@ def compute_error_metrics(learned_model, true_transitions, true_observations, st
     }
 
 
-def visualize_L1_trials(results, title_suffix=''):
+def visualize_L1_trials(results, noise_level=0.01, env_name=''):
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -206,6 +204,15 @@ def visualize_L1_trials(results, title_suffix=''):
                 'Data Size': trial['data_size'],
                 'L1 Error': trial['metrics']['avg_l1_error'],
             })
+        datasizes = set([trail['data_size'] for trail in trials])
+        for datasize in datasizes:
+            L1_values = np.array(
+                [trial['metrics']['avg_l1_error'] for trial in trials if trial['data_size'] == datasize])
+            L1_mean = float(np.mean(L1_values))
+            L1_sd = float(np.std(L1_values, ddof=1)) if L1_values.size > 1 else 0.0
+            count = int(L1_values.size)
+            print(
+                f"{model_name} | data_size={datasize} | mean={L1_mean:.6f} | sd={L1_sd:.6f} | n={count}")
 
     df = pd.DataFrame(plot_data)
     sns.set_theme()
@@ -217,16 +224,21 @@ def visualize_L1_trials(results, title_suffix=''):
         marker='o',
         style='Model'
     )
-    plt.title('Impact of Data Size on Transition Error (L1) - ' + title_suffix)
-    plt.xlabel('Data Size (Trajectories)')
-    plt.ylabel('Average L1 Error (Lower is Better)')
-    plt.grid(linestyle='--', alpha=0.2)
+    #plt.errorbar(df['Data Size'], df['L1 Error'], alpha=0.1)
+    bottom, top = plt.ylim()
+    top = min(top, 1.2)
+    plt.ylim([bottom, top])
+    plt.title('Impact of Data Size on Model Error (L1) - Noise Level: ' + str(noise_level))
+    plt.xlabel('Data Size')
+    plt.ylabel('Average L1 Error')
     plt.legend(title='Model Type')
+    path = env_name + '_SD' + str(noise_level) + '_L1_error_plot.png'
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.01)
+    plt.tight_layout()
     plt.show()
 
 
-def visualize_KL_trials(results, title_suffix=''):
-    sns.set_theme(style="whitegrid", context="talk")
+def visualize_KL_trials(results, noise_level='', env_name=''):
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -239,9 +251,19 @@ def visualize_KL_trials(results, title_suffix=''):
                 'L1 Error': KL_values,
             })
 
+        datasizes = set([trail['data_size'] for trail in trials])
+        for datasize in datasizes:
+            KL_values = np.array(
+                [np.mean(trial['metrics']['final_kl']) for trial in trials if trial['data_size'] == datasize])
+            KL_mean = float(np.mean(KL_values))
+            KL_sd = float(np.std(KL_values, ddof=1)) if KL_values.size > 1 else 0.0
+            count = int(KL_values.size)
+            print(
+                f"{model_name} | data_size={datasize} | mean={KL_mean:.6f} | sd={KL_sd:.6f} | n={count}")
+
     df = pd.DataFrame(plot_data)
 
-    #sns.set_theme()
+    sns.set_theme()
     sns.lineplot(
         data=df,
         x='Data Size',
@@ -250,14 +272,13 @@ def visualize_KL_trials(results, title_suffix=''):
         marker='o',
         style='Model',
     )
-
-
-    plt.ylim([0, 20])
-    plt.title('Impact of Data Size on KL Divergence - ' + title_suffix)
-    plt.xlabel('Data Size (Trajectories)')
-    plt.ylabel('Average KL divergence (Lower is Better)')
-    plt.grid(linestyle='--', alpha=0.4)
+    plt.ylim([0, 14])
+    plt.title('Impact of Data Size on KL Divergence -  Noise Level: ' + str(noise_level))
+    plt.xlabel('Data Size')
+    plt.ylabel('Average KL divergence')
     plt.legend(title='Model Type')
+    plt.tight_layout()
+    plt.savefig(env_name + '_SD' + str(noise_level) + '_KL_error_plot.png', bbox_inches='tight', pad_inches=0.01)
     plt.show()
 
 
