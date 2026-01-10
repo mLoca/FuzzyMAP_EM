@@ -193,7 +193,15 @@ def compute_error_metrics(learned_model, true_transitions, true_observations, st
     }
 
 
-def visualize_L1_trials(results, noise_level=0.01, env_name=''):
+def visualize_L1_trials(results, noise_level=0.01, env_name='', folder_name=''):
+    sns.set_theme(style="whitegrid", context="talk",
+                  rc={
+                      "grid.color": ".9",
+                      "grid.linewidth": 1.0,
+                      "axes.edgecolor": ".3",
+                      "axes.linewidth": 0.8,
+                  }
+                  )
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -215,30 +223,41 @@ def visualize_L1_trials(results, noise_level=0.01, env_name=''):
                 f"{model_name} | data_size={datasize} | mean={L1_mean:.6f} | sd={L1_sd:.6f} | n={count}")
 
     df = pd.DataFrame(plot_data)
-    sns.set_theme()
-    sns.lineplot(
+    #sns.set_theme()
+    plot_obj = sns.lineplot(
         data=df,
         x='Data Size',
         y='L1 Error',
         hue='Model',
         marker='o',
+        linewidth=2,
         style='Model'
     )
-    #plt.errorbar(df['Data Size'], df['L1 Error'], alpha=0.1)
-    bottom, top = plt.ylim()
-    top = min(top, 1.2)
-    plt.ylim([bottom, top])
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1)
+    plt.ylim([_vmin, _vmax])
     plt.title('Impact of Data Size on Model Error (L1) - Noise Level: ' + str(noise_level))
     plt.xlabel('Data Size')
     plt.ylabel('Average L1 Error')
-    plt.legend(title='Model Type')
-    path = env_name + '_SD' + str(noise_level) + '_L1_error_plot.png'
-    plt.savefig(path, bbox_inches='tight', pad_inches=0.01)
+    plt.legend(title='Model Type',
+               frameon=True,
+               loc='upper right',
+               framealpha=0.85
+               )
+    path = folder_name + env_name + '_SD' + str(noise_level) + '_L1_error_plot.png'
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.05)
     plt.tight_layout()
     plt.show()
 
 
-def visualize_KL_trials(results, noise_level='', env_name=''):
+def visualize_KL_trials(results, noise_level='', env_name='',  folder_name=''):
+    sns.set_theme(style="whitegrid", context="talk",
+                  rc={
+                      "grid.color": ".9",
+                      "grid.linewidth": 1.0,
+                      "axes.edgecolor": ".3",
+                      "axes.linewidth": 0.8,
+                  }
+                  )
     plt.figure(figsize=(10, 6))
     plot_data = []
 
@@ -248,7 +267,7 @@ def visualize_KL_trials(results, noise_level='', env_name=''):
             plot_data.append({
                 'Model': model_name,
                 'Data Size': trial['data_size'],
-                'L1 Error': KL_values,
+                'KL Error': KL_values,
             })
 
         datasizes = set([trail['data_size'] for trail in trials])
@@ -263,30 +282,38 @@ def visualize_KL_trials(results, noise_level='', env_name=''):
 
     df = pd.DataFrame(plot_data)
 
-    sns.set_theme()
-    sns.lineplot(
+    #sns.set_theme()
+    plot_obj = sns.lineplot(
         data=df,
         x='Data Size',
-        y='L1 Error',
+        y='KL Error',
         hue='Model',
         marker='o',
+        linewidth=2,
         style='Model',
     )
-    plt.ylim([0, 14])
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1)
+    plt.ylim([_vmin, _vmax])
     plt.title('Impact of Data Size on KL Divergence -  Noise Level: ' + str(noise_level))
     plt.xlabel('Data Size')
     plt.ylabel('Average KL divergence')
-    plt.legend(title='Model Type')
+    plt.legend(title='Model Type',
+               frameon=True,
+               loc='upper right',
+               framealpha=0.85)
     plt.tight_layout()
-    plt.savefig(env_name + '_SD' + str(noise_level) + '_KL_error_plot.png', bbox_inches='tight', pad_inches=0.01)
+    plt.savefig(folder_name+env_name + '_SD' + str(noise_level) + '_KL_error_plot.png',
+                bbox_inches='tight', pad_inches=0.05)
     plt.show()
 
 
 def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
                              param1='lambda_T', param2='lambda_O',
                              title="Hyperparameter Grid Search",
+                             exp_name="", folder_name="res/",
                              vmax=None):
     data = []
+    model_name = None
     for model_name, trails in experiment_results.items():
         p1_match = re.search(f"{param1}=([0-9.]+)", model_name)
         p2_match = re.search(f"{param2}=([0-9.]+)", model_name)
@@ -305,6 +332,7 @@ def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
         avg_score = np.mean(values)
         data.append({param1: val1, param2: val2, metric_key: avg_score})
 
+    env_name = experiment_results[model_name][0]["env_name"]
     df = pd.DataFrame(data)
 
     # Sort the data numerically
@@ -319,7 +347,8 @@ def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
     plt.figure(figsize=(10, 8))
 
     # Plot
-    ax = sns.heatmap(pivot_table, annot=True, fmt=".2f", cmap="viridis_r",  vmax=vmax)
+    _vmax = _compute_lim_from_values(pivot_table.values.flatten(), margin=0.1, vmax=vmax)[1]
+    ax = sns.heatmap(pivot_table, annot=True, fmt=".2f", cmap="viridis_r", vmax=_vmax)
 
     # Format the tick labels
     ax.set_yticklabels([f"{y:.2f}" for y in pivot_table.index], rotation=0)
@@ -329,15 +358,17 @@ def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
     ax.set_xlabel(param2)
 
     plt.title(title)
-    plt.savefig(metric_key+" - grid_search_heatmap.png")
+    plt.tight_layout()
+    plt.savefig(folder_name + metric_key + "_" + env_name + "_grid_search_heatmap.png",
+                bbox_inches='tight', pad_inches=0.01)
     plt.show()
 
 
 def plot_1d_sensitivity(experiment_results, param_name='alpha_ah',
-                        metric_key='kl_final',
+                        metric_key='kl_final', folder_name="res/",
                         title="Parameter Sensitivity", vmax=None, vmin=0):
     data = []
-
+    model_name = None
     for model_name, trails in experiment_results.items():
         p_match = re.search(f"{param_name}=([0-9.]+)", model_name)
         alpha_val = p_match.group(1)
@@ -349,16 +380,39 @@ def plot_1d_sensitivity(experiment_results, param_name='alpha_ah',
 
             data.append({param_name: alpha_val, 'score': val})
 
+    env_name = experiment_results[model_name][0]["env_name"]
     df = pd.DataFrame(data)
 
     plt.figure(figsize=(10, 6))
 
-    sns.lineplot(data=df, x=param_name, y='score', marker='o', linewidth=2)
+    plot_obj = sns.lineplot(data=df, x=param_name, y='score', marker='o', linewidth=2)
 
-    plt.ylim([vmin, vmax if vmax is not None else df['score'].max() * 1.1])
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1, vmax=vmax, vmin=vmin)
+    plt.ylim([_vmin, _vmax])
     plt.title(title)
     plt.xlabel(param_name)
     plt.ylabel(metric_key)
     plt.tight_layout()
-    plt.savefig(metric_key + " - alpha_ah_sensitivity_plot.png")
+    plt.savefig(folder_name + metric_key + "_" + env_name + "_alpha_ah_sensitivity_plot.png",
+                bbox_inches='tight', pad_inches=0.01)
     plt.show()
+
+
+def _compute_lim_from_values(values, margin=0.1, vmax=None, vmin=None):
+    min_val = np.min(values)
+    max_val = np.max(values)
+    y_min = min_val - margin * abs(min_val)
+    y_max = max_val + margin * abs(max_val)
+    if vmax is not None:
+        y_max = min(y_max, vmax)
+    if vmin is not None:
+        y_min = max(y_min, vmin)
+
+    return y_min, y_max
+
+
+def _compute_lim_from_ci(plot_obj, margin=0.1, vmax=None, vmin=None):
+    vertices = plot_obj.collections[0].get_paths()[0].vertices
+    y_min, y_max = _compute_lim_from_values(vertices[:, 1], margin=margin, vmax=vmax, vmin=vmin)
+
+    return y_min, y_max
