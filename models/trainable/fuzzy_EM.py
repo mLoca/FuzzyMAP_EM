@@ -422,7 +422,7 @@ class FuzzyPOMDP(PomdpEM):
             else:
                 for s in range(self.n_states):
                     # Transitions
-                    delta_T = np.abs(curr_T_counts - self.prev_fuzzy_counts_T)
+                    delta_T = np.abs(curr_T_counts[s] - self.prev_fuzzy_counts_T[s])
                     D_s_T = np.mean(delta_T)
                     sigma_data = np.trace(self.obs_covs[s]) + 1e-6
                     normalized_volatility_T = (D_s_T / sigma_data)
@@ -431,7 +431,7 @@ class FuzzyPOMDP(PomdpEM):
                     decay_T = 1.0 / (1.0 + self.alpha_ah * normalized_volatility_T)
                     # Observations
                     # We use the fuzzy_O denominators as counts
-                    delta_O = np.abs(curr_O_counts - self.prev_fuzzy_counts_O)
+                    delta_O = np.abs(curr_O_counts[s] - self.prev_fuzzy_counts_O[s])
                     D_s_O = np.mean(delta_O)
 
                     normalized_volatility_O = (D_s_O / sigma_data)
