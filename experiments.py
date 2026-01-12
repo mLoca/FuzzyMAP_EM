@@ -9,7 +9,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 
 import yaml
-
+import itertools
+import copy
 import numpy as np
 from matplotlib import pyplot as plt
 from pomdp_py import Agent, Environment
@@ -18,13 +19,14 @@ import utils.utils as utils
 
 from models.trainable.pomdp_EM import PomdpEM
 from models.trainable.pomdp_MAP_EM import PomdpMAPEM
-from models.trainable.fuzzy_EM import FuzzyPOMDP, evaluate_fuzzy_reward_prediction, \
+from models.trainable.fuzzy_EM import FuzzyPOMDP, \
     visualize_observation_distributions, _visualize_comparison_observation_distributions
-from fuzzy.fuzzy_model import create_continuous_medical_pomdp, build_fuzzymodel
+from fuzzy.fuzzy_model import create_continuous_medical_pomdp, build_fuzzymodel, collect_data, _evaluate_model
 
 from continouos_pomdp_example import ContinuousObservationModel
 from pomdp_example import *
-from utils.metrics import compute_error_metrics, visualize_L1_trials, visualize_KL_trials
+from utils.metrics import compute_error_metrics, visualize_L1_trials, visualize_KL_trials, plot_grid_search_heatmap, \
+    plot_1d_sensitivity
 
 
 class SyntheticEnvironment:
@@ -151,6 +153,8 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
 
     fuzzy_model = build_fuzzymodel(env.pomdp,
                                    seed=seed)
+    test_df = collect_data(pomdp=env.pomdp, trials=1500, horizon=3, target_per_state=0, state_in_df=True)
+    _evaluate_model(fuzzy_model, test_df)
 
     np.random.seed(seed)
     random.seed(seed)
@@ -244,6 +248,44 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
     #                                                   f"{data_size} Noise: {noise_sd}")
     return results_batch
 
+
+def _expand_models_for_grid_search_(config_models):
+    expanded_models = []
+
+    for model_config in config_models:
+        if not model_config.get("active", True) or not model_config.get("grid_search", False):
+            expanded_models.append(model_config)
+            continue
+
+        param = model_config.get("params", {})
+        model_name = model_config["name"]
+
+        static_params = {k: v for k, v in param.items() if not isinstance(v, list)}
+        dynamic_params = {k: v for k, v in param.items() if isinstance(v, list)}
+
+        if not dynamic_params:
+            expanded_models.append(model_config)
+            continue
+
+        params_names = list(dynamic_params.keys())
+        params_values = list(dynamic_params.values())
+        params_combinations = list(itertools.product(*params_values))
+
+        for i, combination in enumerate(params_combinations):
+            new_config = copy.deepcopy(model_config)
+            new_config["grid_search"] = False
+
+            combination_params = dict(zip(params_names, combination))
+            full_params = {**static_params, **combination_params}
+            new_config["params"] = full_params
+
+            param_suffix = "_".join([f"{k}={v}" for k, v in combination_params.items()])
+            new_config["name"] = f"{model_name}_{param_suffix}"
+            expanded_models.append(new_config)
+
+    return expanded_models
+
+
 def main():
     config_path = os.path.join(os.path.dirname(__file__), 'config', 'experiments.yaml')
     if not os.path.exists(config_path):
@@ -267,10 +309,14 @@ def main():
         print(f"Running experiment {exp_id}...")
         print(f"Experiment description: {exp_config.get('description', 'No description provided.')}")
 
+        folder_name = exp_config.get("folder_name", "res/")
+        config_models = _expand_models_for_grid_search_(exp_config["models"])
         results_summary[exp_id] = {}
+        results_summary[exp_id]['folder_name'] = folder_name
         seq_length, n_trials, noise_levels = exp_config["sequence_length"], exp_config["n_trials"], exp_config[
             "noise_level"]
         env_names, dataset_sizes = exp_config["environments"], exp_config["dataset_sizes"]
+
 
         tasks = []
         for env_name in env_names:
@@ -282,7 +328,6 @@ def main():
             env_config = [e for e in environments if e['name'] == env_name][0]
             results_summary[exp_id][env_name] = {}
 
-            config_models = exp_config["models"]
             standard_param = exp_config.get("standard_params", {})
             # One task per (Dataset Size,  noise_level,  n_trial)
             # Each task will run ALL batch_configs on that specific dataset
@@ -293,7 +338,7 @@ def main():
                         tasks.append((trial, env_config, data_size, seq_length, noise_sd, seed, config_models,
                                       standard_param, verbose))
 
-        if not(global_settings.get("parallel_execution", False)):
+        if not (global_settings.get("parallel_execution", False)):
             # Run tasks SEQUENTIALLY
             for t in tasks:
                 batch_res = run_dataset_batch(*t)
@@ -305,7 +350,7 @@ def main():
                         results_summary[exp_id][env_name][m_name] = []
                     results_summary[exp_id][env_name][m_name].append(res)
         else:
-            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 32)) as executor:
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 6)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
@@ -320,34 +365,73 @@ def main():
                     except Exception as e:
                         print(f"    Batch failed: {e}")
 
-
     print("All experiments completed. Summary of results:")
     for exp_id, env_results in results_summary.items():
         print(f"Experiment {exp_id}:")
+        folder_name = env_results.pop('folder_name', 'res/')
         for env_name, model_results in env_results.items():
-            print(f" Environment: {env_name}")
-            noise_levels = sorted({res['noise_sd'] for results in model_results.values() for res in results})
+            if "grid_search" in exp_id:
 
-            for noise in noise_levels:
-                print(f"  Noise SD: {noise}")
-                filtered_results = {}
-                for model_name, results in model_results.items():
-                    filtered = [r for r in results if r['noise_sd'] == noise]
-                    if filtered:
-                        filtered_results[model_name] = filtered
+                plot_grid_search_heatmap(
+                    model_results,
+                    metric_key='avg_l1_error',
+                    title=f"Grid Search L1 Error",
+                    vmax=1.1,
+                    exp_name=exp_id,
+                    folder_name="res/hyperparameter_grid_search/"
+                )
 
-                visualize_L1_trials(filtered_results, title_suffix=f" Noise SD: {noise}")
-                visualize_KL_trials(filtered_results, title_suffix=f" Noise SD: {noise}")
+                plot_grid_search_heatmap(
+                    model_results,
+                    metric_key='final_kl',
+                    title=f"Grid Search KL Divergence",
+                    vmax=13.5,
+                    exp_name=exp_id,
+                    folder_name="res/hyperparameter_grid_search/"
+                )
 
-                # Stampa i risultati filtrati
-                for model_name, results in filtered_results.items():
-                    print(f"  Model: {model_name}")
-                    for res in results:
-                        print(f"   Data Size: {res['data_size']}, Seq Length: {res['sequence_length']}, "
-                              f"Noise SD: {res['noise_sd']}, Trial: {res['trial']}, "
-                              f"Final LL: {res['final_log_likelihood']:.2f}, "
-                              f"Training Time (s): {res['training_time_sec']:.2f}, "
-                              f"Metrics: {res['metrics']}")
+            elif "adaptive" in exp_id:
+
+                plot_1d_sensitivity(
+                    model_results,
+                    param_name='alpha_ah',
+                    metric_key='avg_l1_error',
+                    title=f"Adaptive Sensitivity: L1 Error",
+                    vmax=1.2, vmin=0.0,
+                    folder_name="res/adaptive_alpha_search/"
+                )
+                plot_1d_sensitivity(
+                    model_results,
+                    param_name='alpha_ah',
+                    metric_key='final_kl',
+                    title=f"Adaptive Sensitivity: KL Divergence vs Alpha",
+                    vmax=12, vmin=0,
+                    folder_name="res/adaptive_alpha_search/"
+                )
+            else:
+                print(f" Environment: {env_name}")
+                noise_levels = sorted({res['noise_sd'] for results in model_results.values() for res in results})
+
+                for noise in noise_levels:
+                    print(f"  Noise SD: {noise}")
+                    filtered_results = {}
+                    for model_name, results in model_results.items():
+                        filtered = [r for r in results if r['noise_sd'] == noise]
+                        if filtered:
+                            filtered_results[model_name] = filtered
+
+                    visualize_L1_trials(filtered_results, noise_level=noise, env_name=env_name, folder_name=folder_name)
+                    visualize_KL_trials(filtered_results, noise_level=noise, env_name=env_name, folder_name=folder_name)
+
+                    for model_name, results in filtered_results.items():
+                        print(f"  Model: {model_name}")
+                        for res in results:
+                            print(f"   Data Size: {res['data_size']}, Seq Length: {res['sequence_length']}, "
+                                  f"Noise SD: {res['noise_sd']}, Trial: {res['trial']}, "
+                                  f"Final LL: {res['final_log_likelihood']:.2f}, "
+                                  f"Training Time (s): {res['training_time_sec']:.2f}, "
+                                  f"Metrics: {res['metrics']}")
+
 
 if __name__ == "__main__":
     main()
