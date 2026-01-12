@@ -2,6 +2,8 @@ import random
 from typing import Tuple
 
 import numpy as np
+from sklearn.metrics import r2_score, mean_squared_error
+
 from continouos_pomdp_example import create_continuous_medical_pomdp, ACTIONS, reset_pomdp
 import pandas as pd
 from pyfume import BuildTakagiSugeno, pyFUME, SugenoFISTester, DataSplitter, FeatureSelector, DataLoader, Clusterer, \
@@ -14,6 +16,7 @@ def collect_data(
         horizon: int = 3,
         pomdp=None,
         target_per_state: int = 130,
+        state_in_df=False
 ):
     """
     Raccoglie dati con massimo `trials` episodi ma cerca di ottenere almeno
@@ -51,6 +54,7 @@ def collect_data(
 
             # esegui transizione una volta per passo
             i = 0
+            reward = 0
             for i in range(len(choices)):
                 next_state, reward = pomdp.env.state_transition(action, execute=False)
                 if getattr(next_state, "name", None) in choices:
@@ -66,14 +70,18 @@ def collect_data(
             # incrementa conteggi quando incontri lo stato target (ricerca durante l'episodio)
             count[next_state.name] += 1
 
-            data.append({
+            trajectory_step = {
                 'test_result': observation[0],
                 'symptoms': observation[1],
                 'action': action_idx,
                 'reward': reward,
                 'next_test': next_observation[0],
                 'next_symptoms': next_observation[1]
-            })
+            }
+            if state_in_df:
+                trajectory_step['state'] = pomdp.env.state.name
+
+            data.append(trajectory_step)
 
             total_reward += reward
             observation = next_observation
@@ -188,12 +196,18 @@ def build_fuzzymodel(pomdp=None, seed=42):
 
     nr_clus = 5
     df = collect_data(trials=200, horizon=3, pomdp=pomdp)
+    print(df[['test_result', 'next_test']].corr())
     df["action"] = df["action"].astype("category")
+    #df["action"] = df["action"].apply(lambda x: f"Act_{x}").astype("category")
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
+    #df["action"] = df["action"].apply(lambda x: f"Act_{x}").astype("category")
+
     df_test = df[["test_result", "symptoms", "action", "next_test"]]
+
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
                  variable_names=['test_result', 'symptoms', 'action', 'next_test'],
+                 process_variables=True,
                  verbose=False)
 
     #print("the mean squared error of the created model is", FIS.calculate_error("MSE"))
@@ -206,8 +220,6 @@ def build_fuzzymodel(pomdp=None, seed=42):
         dl = DataLoader(dataframe=df_test,
                         variable_names=['test_result', 'symptoms', 'action', out], verbose=False)
         variable_names = dl.variable_names
-        dataX = dl.dataX
-        dataY = dl.dataY
 
         # Split the data using the hold-out method in a training (default: 75%)
         # and test set (default: 25%).
@@ -260,6 +272,53 @@ def build_fuzzymodel(pomdp=None, seed=42):
         FIS.FIS.model._rules = FIS.FIS.model._rules + model[0]._rules
 
         return FIS.FIS.model
+
+
+def _predict(model, input_data):
+    for key, value in input_data.items():
+        model.set_variable(key, value)
+    pred_obs = model.Sugeno_inference(["next_test", "next_symptoms"])
+    return pred_obs
+
+
+def _evaluate_model(model, df, inputs=None, outputs=None):
+    if inputs is None:
+        inputs = ['test_result', 'symptoms', 'action']
+    if outputs is None:
+        outputs = ['next_test', 'next_symptoms']
+
+    predictions = {out: [] for out in outputs}
+    real_observations = {out: df[out].values for out in outputs}
+    states = df['state'].values
+
+    # Iterate row by row to predict
+    for _, row in df.iterrows():
+        input_dict = {inp: row[inp] for inp in inputs}
+        res = _predict(model, input_dict)
+        for out in outputs:
+            predictions[out].append(res.get(out, 0.0))
+
+    for out in outputs:
+        predictions[out] = np.array(predictions[out])
+
+    print("\n--- Global MSE ---")
+    for out in outputs:
+        r2 = mean_squared_error(real_observations[out], predictions[out])
+        print(f"Global MSE for '{out}': {r2:.4f}")
+
+    print("\n--- State-by-State Performance ---")
+    unique_states = np.unique(states)
+    for state in unique_states:
+        idx = (states == state)
+        if not any(idx): continue
+
+        print(f"State: {state.upper()}")
+        for out in outputs:
+            y_true_s = real_observations[out][idx]
+            y_pred_s = predictions[out][idx]
+
+            r2_s = mean_squared_error(y_true_s, y_pred_s)
+            print(f"  MSE for '{out}': {r2_s:.4f}")
 
 
 if __name__ == "__main__":
