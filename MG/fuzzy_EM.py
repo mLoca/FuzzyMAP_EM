@@ -7,6 +7,7 @@ from joblib import Parallel, delayed
 from scipy.stats import norm, multivariate_normal
 from sklearn.cluster import KMeans
 
+import models.trainable.fuzzy_EM
 from utils import utils
 from continouos_pomdp_example import (generate_pomdp_data,
                                       STATES)
@@ -15,10 +16,13 @@ from models.trainable.pomdp_EM import PomdpEM
 
 from MG.MG_FM import _simulate_data, build_fuzzy_model
 
-
 OBS_LIST = [
-    "Teff", "Treg", "B", "GC", "SLPB", "LLPC", "IgG", "Complement","Symptoms", "Inflammation",
+    "Teff", "Treg", "B", "GC", "SLPB", "LLPC", "IgG", "Complement", "Symptoms", "Inflammation",
 ]
+obs_var_index = {
+    "Teff": 0, "Treg": 1, "B": 2, "GC": 3, "SLPB": 4,
+    "LLPC": 5, "IgG": 6, "Complement": 7, "Symptoms": 8, "Inflammation": 9
+}
 
 
 class FuzzyPOMDP(PomdpEM):
@@ -32,14 +36,14 @@ class FuzzyPOMDP(PomdpEM):
     def __init__(self, n_states: int, n_actions: int, obs_dim: int, use_fuzzy: bool = False,
                  rho_T: float = 0.05, rho_O: float = 0.05, fuzzy_model=None,
                  verbose: bool = False, fix_transitions=None, fix_observations=None,
-                 fixed_observation_states=None):
-        super().__init__(n_states, n_actions, obs_dim, verbose)
+                 fixed_observation_states=None, parallel=False):
+        super().__init__(n_states, n_actions, obs_dim, verbose, parallel)
         """Initialize the POMDP model with EM capabilities"""
 
         self.use_fuzzy = use_fuzzy
         self.rho_T = rho_T  # weight parameter for pseudo-counts
         self.rho_O = rho_O  # weight parameter for pseudo-counts in observation model
-        self.epsilon_prior = 1e-10
+        self.epsilon_prior = 1e-6  # Small value to avoid division by zero
         self.fix_transitions = fix_transitions
         self.fix_observations = fix_observations
         self.fixed_observation_states = fixed_observation_states if fixed_observation_states is not None else []
@@ -59,7 +63,6 @@ class FuzzyPOMDP(PomdpEM):
                         self.obs_means[s] = np.array(tmp_observation['means'][s], dtype=np.float64)
                         self.obs_covs[s] = np.array(tmp_observation['covariances'][s], dtype=np.float64)
 
-
         # Fuzzy system for observations
         if use_fuzzy:
             if fuzzy_model is None:
@@ -69,7 +72,7 @@ class FuzzyPOMDP(PomdpEM):
         else:
             self.fuzzy_model = None
 
-    def _get_variable_mapping(self, variable_name,action):
+    def _get_variable_mapping(self, variable_name, action):
 
         variable_mapping = {
             "Teff": 0,
@@ -98,13 +101,28 @@ class FuzzyPOMDP(PomdpEM):
         # Flatten the list of observation sequences into a single array
         all_obs = np.vstack([obs_seq for obs_seq in observations])
 
-        # Use K-Means to find cluster centers
-        kmeans = KMeans(n_clusters=self.n_states, random_state=0, n_init=10)
-        kmeans.fit(all_obs)
+        # --- NEW CODE START ---
+        # CRITICAL: Only cluster on the "Clinical" variables (7=Complement, 8=Symptoms)
+        # We ignore the stuck biological variables so K-Means can see the treatment effect.
+        #visible_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        visible_indices = [7, 8]
+        obs_subset = all_obs[:, visible_indices]
+        # --- NEW CODE END ---
 
-        # Assign the cluster centers as the initial means for the observation model
-        self.obs_means = kmeans.cluster_centers_
-        print("Initialized observation means with K-Means.")
+        # Use K-Means to find cluster centers on the SUBSET
+        kmeans = KMeans(n_clusters=self.n_states, random_state=0, n_init=10)
+        kmeans.fit(obs_subset)  # Fit on subset, not all_obs
+
+        # We need to map these 2D centers back to 10D space for the EM class
+        # Initialize full 10D means with the global average
+        global_mean = np.mean(all_obs, axis=0)
+        self.obs_means = np.tile(global_mean, (self.n_states, 1))
+
+        # Overwrite the visible dimensions with the K-Means results
+        # kmeans.cluster_centers_ has shape (n_states, 2)
+        self.obs_means[:, visible_indices] = kmeans.cluster_centers_
+
+        print("Initialized observation means with K-Means (Clinical Features Only).")
 
     def _match_rule_ant(self, rule, action, O_means, state=0):
         """
@@ -189,7 +207,6 @@ class FuzzyPOMDP(PomdpEM):
 
             membership_degree = fuzzy_set.get_value(obs[mapping_value])
 
-
             # Update the match score (you can use different aggregation methods)
             if isAnd:
                 match_score *= membership_degree
@@ -252,12 +269,24 @@ class FuzzyPOMDP(PomdpEM):
         return l_part_obs
 
     def observation_likelihood(self, obs: np.ndarray, state: int) -> float:
-        mu = self.obs_means[state]
-        Sigma = self.obs_covs[state]
-        # Symmetrize and add tiny jitter for numerical stability
-        Sigma = 0.5 * (Sigma + Sigma.T)
-        Sigma = Sigma + 1e-8 * np.eye(self.obs_dim, dtype=Sigma.dtype)
-        return float(multivariate_normal(mean=mu, cov=Sigma, allow_singular=True).pdf(obs))
+        visible_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        # 2. Extract the subset for Means and Covariances
+        mu_full = self.obs_means[state]
+        Sigma_full = self.obs_covs[state]
+
+        # Symmetrize and regularize the FULL matrix first (standard procedure)
+        Sigma_full = 0.5 * (Sigma_full + Sigma_full.T)
+        Sigma_full = Sigma_full + 1e-8 * np.eye(self.obs_dim, dtype=Sigma_full.dtype)
+
+        # 3. Slice the Mean and Covariance to keep only visible variables
+        # We perform the PDF calculation in the lower-dimensional space (3D instead of 10D)
+        mu_vis = mu_full[visible_indices]
+        # Slice covariance: get the sub-block [rows=visible, cols=visible]
+        Sigma_vis = Sigma_full[np.ix_(visible_indices, visible_indices)]
+        obs_vis = obs[visible_indices]
+
+        # 4. Compute Probability only on visible factors
+        return float(multivariate_normal(mean=mu_vis, cov=Sigma_vis, allow_singular=True).pdf(obs_vis))
 
     def _simulate_data_from_current(self, state=0, size=100):
         """
@@ -311,7 +340,7 @@ class FuzzyPOMDP(PomdpEM):
                                     fr_s = self._match_rule_ant(r, a, O_means_k, s)
                                     cons_s, term = self._match_rule_cons(r, a, O_means_k, s)
 
-                                    y_cons = np.copy(O_means_k[s])# Start with mean of premise state
+                                    y_cons = np.copy(O_means_k[s])  # Start with mean of premise state
                                     mapping_value = self._get_variable_mapping(term, None)
 
                                     y_cons[mapping_value] = cons_s
@@ -376,8 +405,9 @@ class FuzzyPOMDP(PomdpEM):
                     combined_weighted_obs_sq_sum_s = data_O_sum_gamma_obs_sq[s] + ps_count_num_cov_sum_matrix_s
                     E_ooT_s = combined_weighted_obs_sq_sum_s / total_weight
                     mu_s_outer_mu_s = np.outer(self.obs_means[s, :], self.obs_means[s, :])
-                    self.obs_covs[s, :, :] = E_ooT_s - mu_s_outer_mu_s
-                    self.obs_covs[s, :, :] += 1e-12 * np.eye(self.obs_dim)
+                    full_cov = E_ooT_s - mu_s_outer_mu_s
+                    self.obs_covs[s, :, :] = full_cov
+                    self.obs_covs[s, :, :] += 1e-6 * np.eye(self.obs_dim)
 
         print("M-step completed. Updated parameters.")
         return
@@ -440,7 +470,7 @@ class FuzzyPOMDP(PomdpEM):
                         self.transitions[s, a, :] = numerator / denominator
 
         if (self.fix_observations is None or
-            (2 > len(self.fixed_observation_states) > 0)):
+                (2 > len(self.fixed_observation_states) > 0)):
 
             # Update observation model parameters
             obs_counts = np.zeros(self.n_states)
@@ -795,7 +825,7 @@ def visualize_observation_distributions(model, n_states, title_prefix=""):
 def run_pomdp_reconstruction():
     """Main experiment function for POMDP reconstruction"""
     # Parameters
-    n_states = 2
+    n_states = 3
     n_actions = 2
     seed = 125405  # For reproducibility
     random.seed(seed)
@@ -807,60 +837,50 @@ def run_pomdp_reconstruction():
     observations, actions = _simulate_data(fuzzy_model, 40, 9)
     obs_dim = len(observations[0][0])  # Number of observation dimensions
 
+    #observations = [sublist[:9] for sublist in observations]
+    #actions = [sublist[:9] for sublist in actions]
+
     # Train fuzzy POMDP model
-    fuzzy_pomdp = FuzzyPOMDP(
+    fuzzy_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(
         n_states=n_states,
         n_actions=n_actions,
         obs_dim=obs_dim,
         use_fuzzy=True,  # Set to True if using fuzzy model
         fuzzy_model=fuzzy_model,
-        rho_T=0.05,
-        rho_O=0.05,
+        lambda_T=0.5,
+        lambda_O=0.5,
         verbose=True,
-        # fix_transitions=np.array(DEFAULT_PARAMS_TRANS),  # Set to None to allow learning transitions
+        obs_var_index=obs_var_index,
+        parallel=False,
+        integration_method="mean",
+        mc_samples=100,
+        hyperparameter_update_method="adaptive",
+        epsilon_prior=1e-4
     )
 
     fuzzy_pomdp.initialize_with_kmeans(observations)
-    #fuzzy_pomdp.initialize_transitions_with_fuzzy_rules()
 
-    #visualize_observation_distributions_per_state(fuzzy_pomdp, n_states, obs_dim, title_prefix="Fuzzy")
-    #print(f"Fuzzy POMDP transitions:\n{fuzzy_pomdp.transitions}")
-    fuzzy_ll = fuzzy_pomdp.fit(
-        observations, actions,
-        max_iterations=9, tolerance=1e-3
-    )
-
-    fuzzy_pomdp.rho_O = 0.000
-    fuzzy_pomdp.rho_T = 0.000
+    for a in range(fuzzy_pomdp.n_actions):
+        fuzzy_pomdp.transitions[:, a, :] = np.array([[0.5, 0.25, 0.25],
+                                                     [0.25, 0.5, 0.25],
+                                                     [0.25, 0.25, 0.5]])
 
     fuzzy_ll = fuzzy_pomdp.fit(
         observations, actions,
-        max_iterations=1, tolerance=1e-3
+        max_iterations=300, tolerance=1e-3
     )
-
-
-
-
-    for s in range(fuzzy_pomdp.n_states):
-        for a in range(fuzzy_pomdp.n_actions):
-            print(f"Transition probabilities from state {s}, action {a}: {fuzzy_pomdp.transitions[s, a, :]}")
-    # Visualize fuzzy model results
-    #visualize_observation_distributions(fuzzy_pomdp, n_states, title_prefix="Fuzzy")
-    #plt.show()
-
-    # Compare with original model
-    #fuzzy_pomdp.compare_state_transitions(
-    #    fuzzy_pomdp.transitions,
-    #    original_pomdp.env.transition_model.transitions,
-    #    original_pomdp.agent.observation_model,
-    #    STATES
-    #)
 
     visualize_observation_distributions_per_state(fuzzy_pomdp, n_states, obs_dim, title_prefix="Fuzzy")
-
+    for s in range(fuzzy_pomdp.n_states):
+        for a in range(fuzzy_pomdp.n_actions):
+            for s_next in range(fuzzy_pomdp.n_states):
+                print(
+                    f"Transition probabilities from state {s}, action {a} to state {s_next}: {fuzzy_pomdp.transitions[s, a, s_next]}")
     visualize_covariance_matrices(fuzzy_pomdp, n_states, title_prefix="Fuzzy")
+    print(fuzzy_pomdp.transitions)
 
     return fuzzy_pomdp
+
 
 def run_pomdp_with_bootstrap(observations, actions, n_bootstrap_samples=10, n_states=2, n_actions=2, obs_dim=10):
     seed = 125405
@@ -885,7 +905,9 @@ def run_pomdp_with_bootstrap(observations, actions, n_bootstrap_samples=10, n_st
     analyze_bootstrap_transitions(trained_models)
     return trained_models
 
-def _train_single_bootstrap_model(sample_index, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model):
+
+def _train_single_bootstrap_model(sample_index, observations, actions, n_sequences, n_states, n_actions, obs_dim,
+                                  fuzzy_model):
     """
     Worker function to train a single POMDP model on one bootstrap sample.
     This is designed to be called in parallel.
@@ -904,8 +926,8 @@ def _train_single_bootstrap_model(sample_index, observations, actions, n_sequenc
         obs_dim=obs_dim,
         use_fuzzy=True,
         fuzzy_model=fuzzy_model,
-        rho_T=0.05,
-        rho_O=0.05,
+        rho_T=0.0,
+        rho_O=0.0,
         verbose=False
     )
 
@@ -913,7 +935,7 @@ def _train_single_bootstrap_model(sample_index, observations, actions, n_sequenc
     bootstrap_pomdp.fit(
         bootstrap_obs,
         bootstrap_actions,
-        max_iterations=10,
+        max_iterations=100,
         tolerance=1e-3
     )
 
@@ -987,7 +1009,6 @@ def visualize_covariance_matrices(model, n_states, title_prefix=""):
     Visualize the covariance matrices for each state as heatmaps.
     """
 
-
     for s in range(n_states):
         plt.figure(figsize=(10, 10))
         sns.heatmap(
@@ -1002,7 +1023,6 @@ def visualize_covariance_matrices(model, n_states, title_prefix=""):
         plt.ylabel("Observation Dimension")
         plt.tight_layout()
         plt.show()
-
 
 
 def visualize_observation_distributions_per_state(model, n_states, obs_dim, title_prefix=""):
@@ -1027,7 +1047,7 @@ def visualize_observation_distributions_per_state(model, n_states, obs_dim, titl
             for s in range(n_states):
                 y = [norm.pdf(val, loc=model.obs_means[s][obs_idx], scale=np.sqrt(model.obs_covs[s][obs_idx, obs_idx]))
                      for val in x]
-                plt.plot(x, y, label=f"State {s + 1}")
+                plt.plot(x, y, label=f"State {s}")
 
             plt.title(f"{title_prefix} Observation {OBS_LIST[obs_idx]}")
             plt.xlabel("Observation Value")
@@ -1037,6 +1057,7 @@ def visualize_observation_distributions_per_state(model, n_states, obs_dim, titl
     plt.tight_layout()
     plt.show()
 
+
 def main():
     """
     Main function to demonstrate POMDP reconstruction using EM algorithm.
@@ -1044,10 +1065,10 @@ def main():
     2. Use EM algorithm to learn/reconstruct the model
     3. Evaluate the reconstruction quality
     """
-    #best_model = run_pomdp_reconstruction()
+    best_model = run_pomdp_reconstruction()
 
-    boostraap_models = run_pomdp_with_bootstrap([], [], n_bootstrap_samples=5, n_states=2, n_actions=2, obs_dim=2)
-    return boostraap_models
+    #boostraap_models = run_pomdp_with_bootstrap([], [], n_bootstrap_samples=5, n_states=2, n_actions=2, obs_dim=2)
+    return best_model
 
 
 if __name__ == "__main__":
