@@ -22,7 +22,7 @@ class PomdpEM:
     """
 
     def __init__(self, n_states: int, n_actions: int, obs_dim: int, verbose: bool = False, seed: int = 42,
-                 parallel: bool = True):
+                 parallel: bool = False, epsilon_prior = 1e-4):
         """Initialize the POMDP model with EM capabilities"""
         self.n_states = n_states
         self.n_actions = n_actions
@@ -42,7 +42,7 @@ class PomdpEM:
 
         self.verbose = verbose
         self.parallel = parallel
-        self.epsilon_prior = 1e-4
+        self.epsilon_prior = epsilon_prior
 
     def initialize_with_kmeans(self, observations):
         """
@@ -53,7 +53,7 @@ class PomdpEM:
         all_obs = np.vstack([obs_seq for obs_seq in observations])
 
         # Use K-Means to find cluster centers
-        kmeans = KMeans(n_clusters=self.n_states, random_state=0, n_init=10)
+        kmeans = KMeans(n_clusters=self.n_states, random_state=0, n_init=40)
         kmeans.fit(all_obs)
 
         # Assign the cluster centers as the initial means for the observation model
@@ -73,13 +73,9 @@ class PomdpEM:
             for s in range(self.n_states):
                 cov = self.obs_covs[s]
                 cov = 0.5 * (cov + cov.T) + self.epsilon_prior * np.eye(self.obs_dim)
-                try:
-                    # Batch computation for all t
-                    obs_probs[:, s] = multivariate_normal.pdf(observations, mean=self.obs_means[s], cov=cov)
-                except np.linalg.LinAlgError:
-                    # Fallback for singular matrices
-                    obs_probs[:, s] = multivariate_normal.pdf(observations, mean=self.obs_means[s], cov=cov,
-                                                              allow_singular=True)
+
+                obs_probs[:, s] = multivariate_normal.pdf(observations, mean=self.obs_means[s], cov=cov,
+                                                          allow_singular=True)
         obs_probs[obs_probs < 1e-300] = 1e-301  # Prevent exact zeros
         return obs_probs
 
@@ -89,7 +85,8 @@ class PomdpEM:
         return multivariate_normal.pdf(
             obs,
             mean=self.obs_means[state],
-            cov=self.obs_covs[state]
+            cov=self.obs_covs[state],
+            allow_singular=True
         )
 
     def forward_pass(self, obs_probs, actions):
@@ -107,7 +104,7 @@ class PomdpEM:
         for t in range(1, T):
             action = actions[t - 1]
             #Vectorized transition - alpha[t-1] (1xS) dot Trans(S, S') - (1xS')
-            alpha_pred = alpha[t - 1] @ self.transitions[:, action, :]
+            alpha_pred = alpha[t - 1] @ self.transitions[:, action, :].squeeze()
 
             alpha[t] = alpha_pred * obs_probs[t]
             c[t] = np.sum(alpha[t])
@@ -130,7 +127,7 @@ class PomdpEM:
 
             term = obs_prob[t + 1] * beta[t + 1]
             #Vectorized transition - Trans(S, S') dot term (S') - (S,)
-            beta[t] = self.transitions[:, action, :] @ term
+            beta[t] = self.transitions[:, action, :].squeeze() @ term
 
             beta[t] /= (np.sum(c[t + 1]) + 1e-20)
 
@@ -155,7 +152,7 @@ class PomdpEM:
 
             term = obs_prob[t + 1] * beta[t + 1].reshape(1, -1)  # (1, S')
             #numeratore
-            xi[t] = (alpha[t].reshape(-1, 1) * self.transitions[:, action, :]) * term  # (S, S')
+            xi[t] = (alpha[t].reshape(-1, 1) * self.transitions[:, action, :].squeeze()) * term  # (S, S')
             # Normalize
             xi[t] /= np.sum(xi[t]) + 1e-20
 
