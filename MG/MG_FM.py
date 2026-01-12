@@ -1,7 +1,10 @@
+from random import random
+
 from simpful import *
 from copy import deepcopy
 import numpy as np
 import matplotlib.pyplot as plt
+import operator
 
 STEP_TO_SAVE = [0, 1, 2, 3, 4, 5, 6, 7]  # Steps at which to save the state of the system
 
@@ -167,8 +170,8 @@ def _simulate_data(FS_model, trials=1, length=7):
     """
     observations = []
     actions = []
+    steps = 14  # Total steps to simulate
     for trail in range(trials):
-
         init_state = {
             'Teff': np.random.random(),
             'Treg': np.random.random(),
@@ -200,18 +203,34 @@ def _simulate_data(FS_model, trials=1, length=7):
         #    if var != 'Ravu':
         #        observation[0, i] = FS._variables[var]
 
-        steps = 30
         dynamics = deepcopy(FS._variables)
         for var in dynamics.keys():
             dynamics[var] = [dynamics[var]]
         # Perform Sugeno inference and save results
-
         step = 0
         for T in np.linspace(0, 1, steps):
+            FS.set_variable('Ravu', treatment)
+
+            #choose the treatment action for the current step randomly
+            #if step >= 0 and step in STEP_TO_SAVE:
+            #   treatment = 0 if random() < 0.5 else 1
+            #   FS.set_variable('Ravu', treatment)
+            #   index_step = STEP_TO_SAVE.index(step)
+            #   action[index_step] = treatment
+            #f step > 0 and step in STEP_TO_SAVE:
+            #   treatment = np.abs(trail % 2 - 1)
+            #   if step > STEP_TO_SAVE[-1] / 2:
+            #       FS.set_variable('Ravu', treatment)
+            #   else:
+            #       FS.set_variable('Ravu', np.abs(treatment - 1))
+            #   index_step = STEP_TO_SAVE.index(step)
+            #   action[index_step] = FS._variables['Ravu']
+
             new_values = FS.Sugeno_inference()
-            FS._variables.update(new_values)
+
             for var in new_values.keys():
                 dynamics[var].append(new_values[var])
+            FS._variables.update(new_values)
             # Perturbations can be added here using the set_variable method
             if step in STEP_TO_SAVE:
                 index_var = 0
@@ -223,6 +242,7 @@ def _simulate_data(FS_model, trials=1, length=7):
                         else:
                             observation[index_step, index_var] = new_values[var]
                         index_var += 1
+
             step += 1
 
         observations.append(observation)
@@ -242,84 +262,123 @@ def _initialize_new_patient(FS, patient_data):
     return FS
 
 
+def symptoms_with_treatment(variable="Symptoms"):
+    """
+    Simulate symptoms dynamics with treatment.
+    :return: None
+    """
+    seed = 55
+    trails = range(50)
+    np.random.seed(seed)
+
+    FS = build_fuzzy_model()
+    steps = 9
+    total_symptoms = [np.zeros(10), np.zeros(10)]
+    counts = [0, 0]
+    for t in trails:
+        init_state = {
+            'Teff': np.random.random(),
+            'Treg': np.random.random(),
+            'B': np.random.random(),
+            'GC': np.random.random(),
+            'SLPB': np.random.random(),
+            'LLPC': np.random.random(),
+            'IgG': np.random.random(),
+            'Complement': np.random.random(),
+            'Symptoms': np.random.random(),
+            'Inflammation': np.random.random()
+        }
+        for treatment in [0, 1]:
+            FS = _initialize_new_patient(FS, init_state)
+            FS.set_variable('Ravu', treatment)  # Set RAVU active/inactive
+            dynamics = deepcopy(FS._variables)
+            for var in dynamics.keys():
+                dynamics[var] = [dynamics[var]]
+
+            for T in np.linspace(0, 1, steps):
+                new_values = FS.Sugeno_inference()
+                FS._variables.update(new_values)
+                for var in new_values.keys():
+                    noise = np.random.normal(0, 0.03)
+                    clipped_value = np.clip(new_values[var] + noise, 0, 1)
+                    new_values[var] = clipped_value
+                    dynamics[var].append(clipped_value)
+                noise = np.random.normal(0, 0.03)
+                new_values_inf = dynamics["Inflammation"][-1]
+                clipped_value = np.clip(new_values_inf + noise, 0, 1)
+                dynamics["Inflammation"].append(clipped_value)
+
+            Symptoms = dynamics[variable]
+
+            total_symptoms[treatment] = list(map(operator.add, total_symptoms[treatment], Symptoms))
+            counts[treatment] += 1
+
+    # Calcola la media dei sintomi per ogni passo temporale
+    total_symptoms[0] = [x / counts[0] for x in total_symptoms[0]]
+    total_symptoms[1] = [x / counts[1] for x in total_symptoms[1]]
+
+    plt.plot(range(steps + 1), total_symptoms[0], label=f'Treatment={0}')
+    plt.plot(range(steps + 1), total_symptoms[1], label=f'Treatment={1}')
+    plt.legend()
+    plt.show()
+
+
 if __name__ == "__main__":
+    #symptoms_with_treatment("B")
     FS = build_fuzzy_model()
 
-    #Define initial state for Teff
-    FS.set_variable('Teff', 0.7)
+    for trial in range(25):
 
-    #Define initial state for Treg
-    FS.set_variable('Treg', 0.5)
+        init_state = {
+            'Teff': np.random.random(),
+            'Treg': np.random.random(),
+            'B': np.random.random(),
+            'GC': np.random.random(),
+            'SLPB': np.random.random(),
+            'LLPC': np.random.random(),
+            'IgG': np.random.random(),
+            'Complement': np.random.random(),
+            'Symptoms': np.random.random(),
+            'Inflammation': np.random.random()
+        }
+        for t in range(2):
+            FS = _initialize_new_patient(FS, init_state)
 
-    #Define initial state for B
-    FS.set_variable('B', 0.3)
+            FS.set_variable('Ravu', t)  # Set RAVU inactive
+            # Set number of inference steps and save initial state
+            steps = 30
+            dynamics = deepcopy(FS._variables)
+            for var in dynamics.keys():
+                dynamics[var] = [dynamics[var]]
+            # Perform Sugeno inference and save results
+            for T in np.linspace(0, 1, steps):
+                FS.set_variable('Ravu', 0)
+                if T > 0.5:
+                    FS.set_variable('Ravu', 1)
+                new_values = FS.Sugeno_inference()
+                FS._variables.update(new_values)
+                # Perturbations can be added here using the set_variable method
+                for var in new_values.keys():
+                    dynamics[var].append(new_values[var])
 
-    #Define initial state for GC
-    FS.set_variable('GC', 0.4)
-
-    #Define initial state for SLPB
-    FS.set_variable('SLPB', 0.2)
-
-    #Define initial state for LLPC
-    FS.set_variable('LLPC', 0.1)
-
-    #Define initial state for IgG
-    FS.set_variable('IgG', 0.3)
-
-    #Define initial state for Complement
-    FS.set_variable('Complement', 0.2)
-
-    #Define initial state for Symptoms
-    FS.set_variable('Symptoms', 0.3)
-
-    #Define initial state for Inflammation
-    FS.set_variable('Inflammation', 0.4)
-
-    init_state = {
-        'Teff': np.random.random(),
-        'Treg': np.random.random(),
-        'B': np.random.random(),
-        'GC': np.random.random(),
-        'SLPB': np.random.random(),
-        'LLPC': np.random.random(),
-        'IgG': np.random.random(),
-        'Complement': np.random.random(),
-        'Symptoms': np.random.random(),
-        'Inflammation': np.random.random()
-    }
-
-    FS = _initialize_new_patient(FS, init_state)
-
-    FS.set_variable('Ravu', 0)  # Set RAVU inactive
-    # Set number of inference steps and save initial state
-    steps = 30
-    dynamics = deepcopy(FS._variables)
-    for var in dynamics.keys():
-        dynamics[var] = [dynamics[var]]
-    # Perform Sugeno inference and save results
-    for T in np.linspace(0, 1, steps):
-        new_values = FS.Sugeno_inference()
-        FS._variables.update(new_values)
-        # Perturbations can be added here using the set_variable method
-        for var in new_values.keys():
-            dynamics[var].append(new_values[var])
-    #Plotting dynamics
-    Teff = dynamics['Teff']
-    Treg = dynamics['Treg']
-    B = dynamics['B']
-    IgG = dynamics['IgG']
-    LLPC = dynamics['LLPC']
-    Complement = dynamics['Complement']
-    Symptoms = dynamics['Symptoms']
-    plt.plot(range(steps + 1), Teff)
-    plt.plot(range(steps + 1), Treg)
-    plt.plot(range(steps + 1), B)
-    plt.plot(range(steps + 1), IgG)
-    plt.plot(range(steps + 1), LLPC)
-    plt.plot(range(steps + 1), Complement)
-    plt.plot(range(steps + 1), Symptoms)
-    plt.ylim(0, 1.05)
-    plt.xlabel('Time')
-    plt.ylabel('Level')
-    plt.legend(['Teff', 'Treg', 'B', 'IgG', 'LLPC', 'Complement', 'Symptoms'], loc='lower right', framealpha=1.0)
-    plt.show()
+            #Plotting dynamics
+            Teff = dynamics['Teff']
+            Treg = dynamics['Treg']
+            B = dynamics['B']
+            IgG = dynamics['IgG']
+            LLPC = dynamics['LLPC']
+            Complement = dynamics['Complement']
+            Symptoms = dynamics['Symptoms']
+            plt.plot(range(steps + 1), Teff)
+            plt.plot(range(steps + 1), Treg)
+            plt.plot(range(steps + 1), B)
+            plt.plot(range(steps + 1), IgG)
+            plt.plot(range(steps + 1), LLPC)
+            plt.plot(range(steps + 1), Complement)
+            plt.plot(range(steps + 1), Symptoms)
+            plt.ylim(0, 1.05)
+            plt.xlabel('Time')
+            plt.ylabel('Level')
+            plt.legend(['Teff', 'Treg', 'B', 'IgG', 'LLPC', 'Complement', 'Symptoms'], loc='lower right',
+                       framealpha=0.9)
+            plt.show()
