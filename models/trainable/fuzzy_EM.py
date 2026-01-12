@@ -47,14 +47,13 @@ class FuzzyPOMDP(PomdpEM):
                  lambda_T=0.05, lambda_O=0.05, fuzzy_model=None,
                  verbose=False, fix_transitions=None, fix_observations=None,
                  fixed_observation_states=None, obs_var_index=None, parallel=True,
-                 use_adaptive_lambda=True,
+                 use_adaptive_lambda=False,
                  integration_method="mean",  # 'mean' or 'montecarlo'
                  mc_samples=100,
                  hyperparameter_update_method="static",  # 'static', 'adaptive', 'empirical_bayes'
-                 eb_learning_rate=0.01,
+                 eb_learning_rate=0.00001,
                  alpha_ah=0.1,
-                 lambda_min=0.0,
-                 lambda_alpha_T=1, lambda_alpha_O=1
+                 lambda_min=0.0
                  ):
         super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed)
 
@@ -100,8 +99,6 @@ class FuzzyPOMDP(PomdpEM):
         if use_fuzzy:
             self.use_adaptive_lambda = use_adaptive_lambda
             self.lambda_min = lambda_min
-            self.lambda_alpha_T = lambda_alpha_T
-            self.lambda_alpha_O = lambda_alpha_O
             if fuzzy_model is None:
                 self.fuzzy_model = build_fuzzymodel(seed=seed)
             else:
@@ -172,7 +169,7 @@ class FuzzyPOMDP(PomdpEM):
         # Extract consequents from the rule
         consequent = rule.split("THEN")[1].strip()
 
-        if self.fuzzy_model._outputfunctions or self.fuzzy_model._outputfunctions is not None:
+        if bool(self.fuzzy_model._outputfunctions):
             return self._match_rule_cons_fun(rule, consequent, action, O_means, state)
         else:
             return self._match_rule_cons_mf(consequent, O_means, state)
@@ -191,6 +188,8 @@ class FuzzyPOMDP(PomdpEM):
         else:
             points = np.array([self.obs_means[state]]).reshape(1, -1)
 
+        consequent = consequent.replace("(", " ")
+        consequent = consequent.replace(")", " ")
         variable, term = consequent.split("IS")
         variable = variable.strip()
         term = term.strip()
@@ -202,7 +201,7 @@ class FuzzyPOMDP(PomdpEM):
 
         # Use a safer eval approach
         o_rule_pred = np.mean(membership_degree)
-        return o_rule_pred, term
+        return o_rule_pred, variable
 
     def _match_rule_cons_fun(self, rule, consequent, action, O_means, state=0):
         """
@@ -316,7 +315,7 @@ class FuzzyPOMDP(PomdpEM):
             fuzzy_Sum_Sq_O = np.zeros((self.n_states, self.obs_dim, self.obs_dim))
 
         # Hyperparameter update
-        if iteration > 20:
+        if iteration > 10:
             if self.use_fuzzy and self.hp_method == "adaptive":
                 self._update_hyperparameters_adaptive(fuzzy_N_T, fuzzy_N_O, len(observations))
             elif self.use_fuzzy and self.hp_method == "empirical_bayes":
@@ -398,6 +397,9 @@ class FuzzyPOMDP(PomdpEM):
 
                 if np.abs(improvement) < tolerance:
                     print(f"Converged after {iteration + 1} iterations")
+                    if self.verbose:
+                        print(
+                            f"Gamma: {np.array2string(gammas[0], precision=4, separator=', ')},")
                     break
 
         except ValueError as e:
@@ -804,7 +806,6 @@ def run_pomdp_reconstruction():
     )
 
     fuzzy_model = build_fuzzymodel()
-    evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model)
 
     # Train fuzzy POMDP model
     fuzzy_pomdp = FuzzyPOMDP(
@@ -877,237 +878,6 @@ def main():
     best_model = run_pomdp_reconstruction()
     return best_model
 
-
-def evaluate_fuzzy_reward_prediction(trials=200, horizon=10, fuzzy_model=None, pomdp=None, seed=15):
-    """
-    Compares the reward predicted by the fuzzy model against the true reward
-    and evaluates next-observation prediction accuracy over simulated trajectories.
-    """
-
-    np.random.seed(seed)
-    random.seed(seed)
-
-    base_reward_model = pomdp.agent.reward_model if pomdp is not None else MedicalRewardModel()
-    fuzzy_model = fuzzy_model if fuzzy_model is not None else build_fuzzymodel(pomdp=pomdp)
-    transition_model = pomdp.agent.transition_model if pomdp is not None else MedicalTransitionModel()
-    observation_model = pomdp.agent.observation_model if pomdp is not None else ContinuousObservationModel(STATES,
-                                                                                                           ACTIONS)
-    true_obs = []
-    true_next_obs_healthy = []
-    true_next_obs_sick = []
-    true_next_obs_critical = []
-
-    pred_obs_fm = []
-    pred_next_obs_healthy = []
-    pred_next_obs_sick = []
-    pred_next_obs_critical = []
-    all_actions = [MedAction(a) for a in ["wait", "treat"]]
-    all_states = [State(s) for s in ["healthy", "sick", "critical"]]
-
-    # For storing predictions and true observations
-    dict_obs = {}
-    for state in all_states:
-        for next_state in all_states:
-            dict_obs[(state.name, next_state.name)] = {
-                "true_next_obs": [],
-                "pred_next_obs": []
-            }
-
-    def mapping(state_name):
-        if state_name == "healthy":
-            return 0
-        elif state_name == "sick":
-            return 1
-        elif state_name == "critical":
-            return 2
-
-    for _ in range(trials):
-        current_state = random.choice(all_states)
-        for _ in range(horizon):
-            action = random.choice(all_actions)
-            # Sample next state and true next observation
-            next_state = transition_model.sample(current_state, action)
-            actual_obs = observation_model.sample(next_state, action)
-            # True reward
-            r_true = base_reward_model.sample(current_state, action, next_state)
-
-            # Fuzzy prediction
-            action_fm = 0 if action.name == "wait" else 1
-            fuzzy_model.set_variable("action", action_fm)
-            fuzzy_model.set_variable("test_result", actual_obs[0])
-            fuzzy_model.set_variable("symptoms", actual_obs[1])
-            pred_obs = fuzzy_model.Sugeno_inference(["next_test", "next_symptoms"])
-
-            # Record metrics
-            true_obs.append(actual_obs)
-            pred_obs_fm.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
-            if next_state.name == "healthy":
-                true_next_obs_healthy.append(actual_obs)
-                pred_next_obs_healthy.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
-            elif next_state.name == "sick":
-                true_next_obs_sick.append(actual_obs)
-                pred_next_obs_sick.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
-            elif next_state.name == "critical":
-                true_next_obs_critical.append(actual_obs)
-                pred_next_obs_critical.append([pred_obs["next_test"], pred_obs["next_symptoms"]])
-
-            # Store next observation predictions
-            dict_obs[(current_state.name, next_state.name)]["true_next_obs"].append(actual_obs)
-            dict_obs[(current_state.name, next_state.name)]["pred_next_obs"].append([pred_obs["next_test"],
-                                                                                     pred_obs["next_symptoms"]])
-
-            current_state = next_state
-
-    # Convert to numpy arrays
-    for output in [(true_next_obs_healthy, pred_next_obs_healthy),
-                   (true_next_obs_sick, pred_next_obs_sick),
-                   (true_next_obs_critical, pred_next_obs_critical)]:
-        true_next_obs = output[0]
-        pred_next_obs = output[1]
-        test_true = np.array([obs[0] for obs in true_next_obs])
-        test_pred = np.array([obs[0] for obs in pred_next_obs])
-        symp_true = np.array([obs[1] for obs in true_next_obs])
-        symp_pred = np.array([obs[1] for obs in pred_next_obs])
-
-        r2_test = r2_score(test_true, test_pred)
-        r2_sym = r2_score(symp_true, symp_pred)
-
-        # Observation prediction accuracy
-        #obs_accuracy = np.mean([t == p for t, p in zip(true_next_obs, pred_next_obs)])
-
-        # Print results
-        print("\n--- Fuzzy Reward & Observation Prediction Performance ---")
-        print(f"Total steps: {trials * horizon}")
-        print(f"Test Result R²: {r2_test:.4f}")
-        print(f"Symptoms R²: {r2_sym:.4f}")
-
-    # Print detailed results for each state transition
-    print("\n--- Detailed Next Observation Predictions ---")
-    for key, value in dict_obs.items():
-        state, next_state = key
-        true_next_obs = np.array(value["true_next_obs"])
-        pred_next_obs = np.array(value["pred_next_obs"])
-        if true_next_obs.size > 0:
-            true_test = np.array([obs[0] for obs in true_next_obs])
-            true_symptoms = np.array([obs[1] for obs in true_next_obs])
-            pred_test = np.array([obs[0] for obs in pred_next_obs])
-            pred_symptoms = np.array([obs[1] for obs in pred_next_obs])
-
-            r2_test = r2_score(true_test, pred_test)
-            r2_symptoms = r2_score(true_symptoms, pred_symptoms)
-            rmse_test = root_mean_squared_error(true_test, pred_test)
-            rmse_sym = root_mean_squared_error(true_symptoms, pred_symptoms)
-
-            print(f"Transition {state} -> {next_state}:")
-            print(f"  Count: {len(true_next_obs)}")
-            print(f"  Test Result R²: {r2_test:.4f} | RMSE: {rmse_test:.4f}")
-            print(f"  Symptoms R²: {r2_symptoms:.4f} | RMSE: {rmse_sym:.4f}")
-
-    print("general r2 scores:")
-    test_true = np.array([obs[0] for obs in true_obs])
-    test_pred = np.array([obs[0] for obs in pred_obs_fm])
-    symp_true = np.array([obs[1] for obs in true_obs])
-    symp_pred = np.array([obs[1] for obs in pred_obs_fm])
-
-    rmse_test = root_mean_squared_error(test_true, test_pred)
-    rmse_sym = root_mean_squared_error(symp_true, symp_pred)
-
-    print(f"Test Result R²: {r2_score(test_true, test_pred):.4f} | RMSE: {rmse_test:.4f}")
-    print(f"Symptoms R²: {r2_score(symp_true, symp_pred):.4f} | RMSE: {rmse_sym:.4f}")
-
-    # 1. Scatter plot dei valori reali vs predetti
-    plt.figure(figsize=(15, 6))
-
-    # Test Result
-    plt.subplot(1, 2, 1)
-    plt.scatter(test_true, test_pred, alpha=0.5)
-    plt.plot([0, 1], [0, 1], 'r--')  # linea di perfetta previsione
-    plt.xlabel('Real value (Test Result)')
-    plt.ylabel('Prediction (Test Result)')
-    plt.title('Real value vs prediction - Test Result')
-    plt.grid(True, linestyle='--', alpha=0.7)
-
-    # Symptoms
-    plt.subplot(1, 2, 2)
-    plt.scatter(symp_true, symp_pred, alpha=0.5)
-    plt.plot([0, 1], [0, 1], 'r--')  # linea di perfetta previsione
-    plt.xlabel('Real value (Symptoms)')
-    plt.ylabel('Prediction (Symptoms)')
-    plt.title('Real value vs prediction - Symptoms')
-    plt.grid(True, linestyle='--', alpha=0.7)
-
-    plt.tight_layout()
-    plt.show()
-
-    # 2. Distribuzione degli errori per stato
-    plt.figure(figsize=(15, 6))
-    states = ['healthy', 'sick', 'critical']
-    colors = ['blue', 'orange', 'green']
-
-    # Crea DataFrame per ogni stato
-    df_states = {}
-    for i, (state, true_obs, pred_obs) in enumerate(zip(
-            states,
-            [true_next_obs_healthy, true_next_obs_sick, true_next_obs_critical],
-            [pred_next_obs_healthy, pred_next_obs_sick, pred_next_obs_critical]
-    )):
-        if len(true_obs) > 0:
-            test_errors = np.array([t[0] for t in true_obs]) - np.array([p[0] for p in pred_obs])
-            symp_errors = np.array([t[1] for t in true_obs]) - np.array([p[1] for p in pred_obs])
-            df_states[state] = pd.DataFrame({
-                'Test Result': test_errors,
-                'Symptoms': symp_errors,
-                'State': state
-            })
-
-    # Unisci i DataFrame
-    df_all_states = pd.concat(df_states.values())
-    df_all_states_melted = df_all_states.melt(id_vars=['State'], var_name='Variable', value_name='Error')
-
-    # Crea il violin plot
-    sns.violinplot(x='Variable', y='Error', hue='State', data=df_all_states_melted, split=False)
-    plt.title('Error distribution by State and Variable')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.show()
-
-    # 3. Heatmap dell'errore medio per transizione di stato
-    plt.figure(figsize=(10, 8))
-    transitions = []
-    errors_test = []
-    errors_symp = []
-
-    for (state, next_state), data in dict_obs.items():
-        if len(data['true_next_obs']) > 0:
-            true_test = np.array([obs[0] for obs in data['true_next_obs']])
-            pred_test = np.array([obs[0] for obs in data['pred_next_obs']])
-            true_symp = np.array([obs[1] for obs in data['true_next_obs']])
-            pred_symp = np.array([obs[1] for obs in data['pred_next_obs']])
-
-            transitions.append(f"{state}->{next_state}")
-            errors_test.append(root_mean_squared_error(true_test, pred_test))
-            errors_symp.append(root_mean_squared_error(true_symp, pred_symp))
-
-    df_transitions = pd.DataFrame({
-        'Transition': transitions,
-        'Test Error': errors_test,
-        'Symptoms Error': errors_symp
-    })
-
-    # Crea una matrice per la heatmap
-    matrix_data = pd.pivot_table(
-        df_transitions,
-        values=['Test Error', 'Symptoms Error'],
-        index='Transition',
-        aggfunc='mean'
-    )
-
-    # Plot heatmap
-    sns.heatmap(matrix_data, annot=True, cmap='viridis_r', fmt='.3f')
-    plt.title('RMSE Error Heatmap by Transition')
-    plt.tight_layout()
-    plt.show()
-    return
 
 
 if __name__ == "__main__":
