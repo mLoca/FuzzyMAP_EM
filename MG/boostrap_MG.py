@@ -7,25 +7,26 @@ from MG.MG_FM import build_fuzzy_model, _simulate_data
 from MG.fuzzy_EM import FuzzyPOMDP
 
 
-def run_pomdp_with_bootstrap(observations, actions, n_bootstrap_samples=2000, n_states=2, n_actions=2, obs_dim=10):
+def run_pomdp_with_bootstrap(observations, actions, n_bootstrap_samples=500, n_states=2, n_actions=2, obs_dim=10):
     seed = 125405
     random.seed(seed)
     np.random.seed(seed)
 
     fuzzy_model = build_fuzzy_model()
-    observations, actions = _simulate_data(fuzzy_model, 40, 9)
+    observations, actions = _simulate_data(fuzzy_model, 90, 5)
     obs_dim = len(observations[0][0])
     n_sequences = len(observations)
 
-    print(f"Running {n_bootstrap_samples} bootstrap samples in parallel using {5} jobs...")
 
+    print(f"Running {n_bootstrap_samples} bootstrap samples in parallel using {12} jobs...")
+    trained_models = []
     # Use joblib to run the training in parallel
-    #trained_models = Parallel(n_jobs=5)(
+    #trained_models = Parallel(n_jobs=12)(
     #    delayed(_train_single_bootstrap_model)(
     #        i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
     #    ) for i in range(n_bootstrap_samples)
     #)
-    trained_models = []
+
     for i in range(n_bootstrap_samples):
         model = _train_single_bootstrap_model(
             i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
@@ -55,25 +56,18 @@ def _train_single_bootstrap_model(sample_index, observations, actions, n_sequenc
         obs_dim=obs_dim,
         use_fuzzy=True,
         fuzzy_model=fuzzy_model,
-        rho_T=0.05,
+        rho_T=0.10,
         rho_O=0.05,
-        verbose=False
+        verbose=False,
+        parallel=False
     )
 
     bootstrap_pomdp.initialize_with_kmeans(bootstrap_obs)
     bootstrap_pomdp.fit(
         bootstrap_obs,
         bootstrap_actions,
-        max_iterations=10,
+        max_iterations=100,
         tolerance=1e-3
-    )
-
-    # Second fitting stage as in the original code
-    bootstrap_pomdp.rho_O = 0.000
-    bootstrap_pomdp.rho_T = 0.000
-    bootstrap_pomdp.fit(
-        observations, actions,
-        max_iterations=1, tolerance=1e-3
     )
 
     print(f"--- Finished Bootstrap Sample {sample_index + 1} ---")
@@ -141,7 +135,8 @@ def main():
     """
     # best_model = run_pomdp_reconstruction()
 
-    boostraap_models = run_pomdp_with_bootstrap([], [], n_bootstrap_samples=2000, n_states=2, n_actions=2, obs_dim=2)
+    boostraap_models = run_pomdp_with_bootstrap([], [],
+                                                n_bootstrap_samples=150, n_states=2, n_actions=2, obs_dim=2)
     return boostraap_models
 
 if __name__ == "__main__":
