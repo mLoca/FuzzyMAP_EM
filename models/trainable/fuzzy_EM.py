@@ -53,9 +53,11 @@ class FuzzyPOMDP(PomdpEM):
                  hyperparameter_update_method="static",  # 'static', 'adaptive', 'empirical_bayes'
                  eb_learning_rate=0.00001,
                  alpha_ah=0.1,
-                 lambda_min=0.0
+                 lambda_min=0.0,
+                 epsilon_prior=1e-4
                  ):
-        super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed)
+        super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed,
+                         epsilon_prior=epsilon_prior)
 
         """Initialize the POMDP model with EM capabilities"""
 
@@ -255,23 +257,23 @@ class FuzzyPOMDP(PomdpEM):
                 for rule in rules:
 
                     match_score = self._match_rule_ant(rule, a, s)
-                    cons_s, term = self._match_rule_cons(rule, a, self.obs_means, s)
+                    cons_s, var_name = self._match_rule_cons(rule, a, self.obs_means, s)
 
                     if match_score < 1e-9: continue
+
+                    clean_var_name = var_name.replace("next_", "").strip()
+                    idx = self.obs_var_index.get(clean_var_name)
+
+                    if idx is None: continue
 
                     for s_prime in range(self.n_states):
                         strength = match_score * self.transitions[s, a, s_prime]
                         pseudo_count_O_den[s_prime] += strength
 
                         mean_copy = np.copy(self.obs_means[s])
-                        if term == "next_test":
-                            mean_copy[0] = cons_s
-                            pdf_s_prime = self._marginal_likelihood(cons_s, s_prime, 0)
-                            pseudo_count_O_mean[s_prime, 0] += strength * cons_s
-                        else:
-                            mean_copy[1] = cons_s
-                            pdf_s_prime = self._marginal_likelihood(cons_s, s_prime, 1)
-                            pseudo_count_O_mean[s_prime, 1] += strength * cons_s
+                        mean_copy[idx] = cons_s
+                        pdf_s_prime = self._marginal_likelihood(cons_s, s_prime, idx)
+                        pseudo_count_O_mean[s_prime, :] += strength * mean_copy * pdf_s_prime
                         pseudo_count_T[s, a, s_prime] += match_score * pdf_s_prime
 
                         pseudo_count_O_cov[s_prime, :, :] += strength * np.outer(mean_copy, mean_copy)
