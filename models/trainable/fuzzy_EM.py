@@ -48,16 +48,18 @@ class FuzzyPOMDP(PomdpEM):
                  verbose=False, fix_transitions=None, fix_observations=None,
                  fixed_observation_states=None, obs_var_index=None, parallel=True,
                  use_adaptive_lambda=False,
+                 ensure_psd=False,
                  integration_method="mean",  # 'mean' or 'montecarlo'
                  mc_samples=100,
                  hyperparameter_update_method="static",  # 'static', 'adaptive', 'empirical_bayes'
-                 eb_learning_rate=0.00001,
+                 eb_learning_rate_O=0.01,
+                 eb_learning_rate_T=0.01,
                  alpha_ah=0.1,
                  lambda_min=0.0,
                  epsilon_prior=1e-4
                  ):
         super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed,
-                         epsilon_prior=epsilon_prior)
+                         epsilon_prior=epsilon_prior, ensure_psd=ensure_psd)
 
         """Initialize the POMDP model with EM capabilities"""
 
@@ -89,7 +91,8 @@ class FuzzyPOMDP(PomdpEM):
 
         # Hyperparameters for Empirical Bayes
         self.hp_method = hyperparameter_update_method
-        self.eb_lr = eb_learning_rate
+        self.eb_lr_T = eb_learning_rate_T
+        self.eb_lr_O = eb_learning_rate_O
 
         #Adaptive Learning
         self.alpha_ah = alpha_ah
@@ -350,7 +353,10 @@ class FuzzyPOMDP(PomdpEM):
                                                               fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O, s)
 
                 # Ensure covariance matrix is positive definite
-                cov_O += self.epsilon_prior * np.eye(self.obs_dim)
+                if self.ensure_psd:
+                    cov_O = self._ensure_psd(cov_O)
+                else:
+                    cov_O += self.epsilon_prior * np.eye(self.obs_dim)
 
                 self.obs_covs[s] = cov_O
 
@@ -474,7 +480,7 @@ class FuzzyPOMDP(PomdpEM):
             grad_lambda_T[s] = grad_sum_s
 
         # Apply gradient ascent step
-        self.lambda_T += self.eb_lr * grad_lambda_T
+        self.lambda_T += self.eb_lr_T * grad_lambda_T
         self.lambda_T = np.maximum(self.lambda_T, 0)
 
     def _empirical_bayes_observation(self, emp_N_O, emp_Sum_O, emp_Sum_sq_O,
@@ -506,7 +512,8 @@ class FuzzyPOMDP(PomdpEM):
             kappa_n = kappa_0 + n_emp
             nu_n = nu_0 + n_emp
             mu_n = (kappa_0 * mu_0 + n_emp * mu_data) / (kappa_0 + n_emp)
-            psi_n = psi_0 + psi_data + ((kappa_0 * n_emp) / (kappa_0 + n_emp)) * np.outer(diff_mu_data_0, diff_mu_data_0)
+            psi_n = psi_0 + psi_data + ((kappa_0 * n_emp) / (kappa_0 + n_emp)) * np.outer(diff_mu_data_0,
+                                                                                          diff_mu_data_0)
 
             # Gradient computation
 
@@ -536,7 +543,7 @@ class FuzzyPOMDP(PomdpEM):
             grad_lambda_O[s] = term_1 + term_2 + term_3 + term_4
 
         # Apply gradient ascent step
-        self.lambda_O += self.eb_lr * 1/10 * grad_lambda_O
+        self.lambda_O += self.eb_lr_O * 1 / 10 * grad_lambda_O
         self.lambda_O = np.maximum(self.lambda_O, 0)
 
     def _compute_cov_empirical_bayes(self, emp_N_O, emp_Sum_O, emp_Sum_sq_O,
@@ -808,6 +815,7 @@ def run_pomdp_reconstruction():
     )
 
     fuzzy_model = build_fuzzymodel()
+    #evaluate_fuzzy_reward_prediction(300, 10, fuzzy_model=fuzzy_model)
 
     # Train fuzzy POMDP model
     fuzzy_pomdp = FuzzyPOMDP(
