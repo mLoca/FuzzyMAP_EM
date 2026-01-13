@@ -22,8 +22,10 @@ class PomdpEM:
     """
 
     def __init__(self, n_states: int, n_actions: int, obs_dim: int, verbose: bool = False, seed: int = 42,
-                 parallel: bool = False, epsilon_prior = 1e-4):
+                 parallel: bool = False, epsilon_prior = 1e-4,
+                 ensure_psd = False):
         """Initialize the POMDP model with EM capabilities"""
+        self.ensure_psd = ensure_psd
         self.n_states = n_states
         self.n_actions = n_actions
         self.obs_dim = obs_dim
@@ -61,6 +63,19 @@ class PomdpEM:
         if self.verbose:
             print("Initialized observation means with K-Means.")
 
+    #TODO: remove it
+    def observation_likelihood(self, obs, state):
+        """Compute P(o|s) using multivariate Gaussian"""
+
+        cov = self.obs_covs[state] if not self.ensure_psd else self._ensure_psd(self.obs_covs[state])
+
+        return multivariate_normal.pdf(
+            obs,
+            mean=self.obs_means[state],
+            cov=cov,
+            allow_singular=True
+        )
+
     def _compute_emission_matrix(self, observations):
         """
         Compute the emission probability matrix for all observations and states
@@ -71,23 +86,12 @@ class PomdpEM:
 
         for t in range(T):
             for s in range(self.n_states):
-                cov = self.obs_covs[s]
-                cov = 0.5 * (cov + cov.T) + self.epsilon_prior * np.eye(self.obs_dim)
+                cov = self._ensure_psd(self.obs_covs[s])
 
                 obs_probs[:, s] = multivariate_normal.pdf(observations, mean=self.obs_means[s], cov=cov,
                                                           allow_singular=True)
         obs_probs[obs_probs < 1e-300] = 1e-301  # Prevent exact zeros
         return obs_probs
-
-    #TODO: remove it
-    def observation_likelihood(self, obs, state):
-        """Compute P(o|s) using multivariate Gaussian"""
-        return multivariate_normal.pdf(
-            obs,
-            mean=self.obs_means[state],
-            cov=self.obs_covs[state],
-            allow_singular=True
-        )
 
     def forward_pass(self, obs_probs, actions):
         """Forward algorithm computing α_t(s)"""
@@ -251,7 +255,10 @@ class PomdpEM:
                 E_ooT_s = data_O_sum_gamma_obs_sq[s] / total_weight
                 mu_s_outer_mu_s = np.outer(self.obs_means[s, :], self.obs_means[s, :])
                 self.obs_covs[s, :, :] = E_ooT_s - mu_s_outer_mu_s
-                self.obs_covs[s, :, :] += self.epsilon_prior * np.eye(self.obs_dim)  # Regularization
+                if self.ensure_psd:
+                    self.obs_covs[s, :, :] = self._ensure_psd(self.obs_covs[s, :, :])
+                else:
+                    self.obs_covs[s, :, :] += self.epsilon_prior * np.eye(self.obs_dim)  # Regularization
 
         return
 
@@ -292,6 +299,16 @@ class PomdpEM:
 
         return log_likelihood
 
+    def _ensure_psd(self, sigma, min_val=None):
+        """Ensure covariance matrix is positive semi-definite"""
+        if min_val is None:
+            min_val = self.epsilon_prior
+
+        # Symmetrize add regularization to diagonal
+        sigma = 0.5 * (sigma + sigma.T)
+        sigma = sigma + min_val * np.eye(sigma.shape[0])
+
+        return sigma
     #TODO: refactor this function to be cleaner
     #TODO: move to a visualization module
     def compare_state_transitions(self, learned_transitions, baseline_transitions, baseline_observations, states_list,
