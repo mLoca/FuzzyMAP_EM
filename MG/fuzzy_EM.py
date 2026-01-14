@@ -3,16 +3,10 @@ import random
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from joblib import Parallel, delayed
-from scipy.stats import norm, multivariate_normal
-from sklearn.cluster import KMeans
+from scipy.stats import norm
 
 import models.trainable.fuzzy_EM
-from utils import utils
-from continouos_pomdp_example import (generate_pomdp_data,
-                                      STATES)
-from fuzzy.fuzzy_model import build_fuzzymodel
-from models.trainable.pomdp_EM import PomdpEM
+
 
 from MG.MG_FM import _simulate_data, build_fuzzy_model
 
@@ -23,66 +17,6 @@ obs_var_index = {
     "Teff": 0, "Treg": 1, "B": 2, "GC": 3, "SLPB": 4,
     "LLPC": 5, "IgG": 6, "Complement": 7, "Symptoms": 8, "Inflammation": 9
 }
-
-
-def plot_sensitivity_results(results):
-    """
-    Plot the sensitivity analysis results as a heatmap.
-
-    Args:
-        results: Dictionary with keys 'rho_T=X, rho_O=Y' and distance values
-    """
-    # Extract unique rho values
-    rho_T_values = []
-    rho_O_values = []
-
-    for key in results.keys():
-        parts = key.split(',')
-        rho_T = float(parts[0].split('=')[1])
-        rho_O = float(parts[1].split('=')[1])
-
-        if rho_T not in rho_T_values:
-            rho_T_values.append(rho_T)
-        if rho_O not in rho_O_values:
-            rho_O_values.append(rho_O)
-
-    # Sort the values
-    rho_T_values.sort()
-    rho_O_values.sort()
-
-    # Create the heatmap data
-    heatmap_data = np.zeros((len(rho_T_values), len(rho_O_values)))
-
-    for i, rho_T in enumerate(rho_T_values):
-        for j, rho_O in enumerate(rho_O_values):
-            key = f"rho_T={rho_T}, rho_O={rho_O}"
-            heatmap_data[i, j] = results[key]
-
-    # Create the plot
-    plt.figure(figsize=(10, 8))
-    im = plt.imshow(heatmap_data, cmap='viridis_r')  # viridis_r makes lower values (better) darker
-
-    # Add colorbar
-    cbar = plt.colorbar(im)
-    #cbar.set_label('L1 Distance (lower is better)')
-
-    # Set labels
-    plt.title('POMDP Reconstruction Sensitivity Analysis')
-    plt.xlabel('rho_O values')
-    plt.ylabel('rho_T values')
-
-    # Set ticks
-    plt.xticks(np.arange(len(rho_O_values)), [f"{x:.2f}" for x in rho_O_values])
-    plt.yticks(np.arange(len(rho_T_values)), [f"{x:.2f}" for x in rho_T_values])
-
-    # Add text annotations
-    for i in range(len(rho_T_values)):
-        for j in range(len(rho_O_values)):
-            text = plt.text(j, i, f"{heatmap_data[i, j]:.3f}",
-                            ha="center", va="center", color="w" if heatmap_data[i, j] > 0.5 else "black")
-
-    plt.tight_layout()
-    plt.show()
 
 
 def visualize_observation_distributions(model, n_states, title_prefix=""):
@@ -125,11 +59,8 @@ def run_pomdp_reconstruction():
     # Generate training data
     fuzzy_model = build_fuzzy_model()
 
-    observations, actions = _simulate_data(fuzzy_model, 40, 9)
-    obs_dim = len(observations[0][0])  # Number of observation dimensions
-
-    #observations = [sublist[:9] for sublist in observations]
-    #actions = [sublist[:9] for sublist in actions]
+    observations, actions = _simulate_data(fuzzy_model, 40, 8)
+    obs_dim = len(observations[0][0])
 
     # Train fuzzy POMDP model
     fuzzy_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(
@@ -138,27 +69,37 @@ def run_pomdp_reconstruction():
         obs_dim=obs_dim,
         use_fuzzy=True,  # Set to True if using fuzzy model
         fuzzy_model=fuzzy_model,
-        lambda_T=0.5,
-        lambda_O=0.5,
+        lambda_T=0.25,
+        lambda_O=0.25,
         verbose=True,
         obs_var_index=obs_var_index,
         parallel=False,
+        integration_method="mean",
         hyperparameter_update_method="adaptive",
-        epsilon_prior=1e-4
+        ensure_psd=True
     )
 
     fuzzy_pomdp.initialize_with_kmeans(observations)
 
     for a in range(fuzzy_pomdp.n_actions):
-        fuzzy_pomdp.transitions[:, a, :] = np.array([[0.5, 0.25, 0.25],
-                                                     [0.25, 0.5, 0.25],
-                                                     [0.25, 0.25, 0.5]])
-
+        #fuzzy_pomdp.transitions[:, a, :] = np.array([[0.85, 0.15],
+        #                                             [0.15, 0.85]])
+        fuzzy_pomdp.transitions[:, a, :] = np.array([[0.50, 0.25, 0.25],
+                                                     [0.25, 0.50, 0.25],
+                                                    [0.25, 0.25, 0.50]])
     fuzzy_ll = fuzzy_pomdp.fit(
         observations, actions,
-        max_iterations=300, tolerance=1e-3
+        max_iterations=300, tolerance=1e-4
     )
 
+    fuzzy_pomdp.lambda_T = np.zeros(n_states)
+    fuzzy_pomdp.lambda_O = np.zeros(n_states)
+
+    #fuzzy_ll = fuzzy_pomdp.fit(
+    #    observations, actions,
+    #    max_iterations=1, tolerance=1e-4
+    #)
+#
     visualize_observation_distributions_per_state(fuzzy_pomdp, n_states, obs_dim, title_prefix="Fuzzy")
     for s in range(fuzzy_pomdp.n_states):
         for a in range(fuzzy_pomdp.n_actions):
