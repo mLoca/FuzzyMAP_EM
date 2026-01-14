@@ -17,7 +17,6 @@ from continouos_pomdp_example import (generate_pomdp_data,
 from fuzzy.fuzzy_model import build_fuzzymodel
 from utils.utils import _prob_sum, multidigamma
 
-
 DEFAULT_PARAMS_TRANS = [
     [[0.85, 0.14, 0.01],
      [0.80, 0.15, 0.05]],
@@ -62,6 +61,7 @@ class FuzzyPOMDP(PomdpEM):
         super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed,
                          epsilon_prior=epsilon_prior, ensure_psd=ensure_psd)
 
+        self.transition_inertia = 0
         """Initialize the POMDP model with EM capabilities"""
 
         self.use_fuzzy = use_fuzzy
@@ -217,8 +217,10 @@ class FuzzyPOMDP(PomdpEM):
         #TODO: generalize for multiple outputs
         #Once is generalized we can remove the rule parameter.
         if 'next_test' in rule or 'next_symptoms' in rule:
+
             function_str = consequent.split("IS")[1][1:5]
             term = consequent.split("IS")[0].replace("(", "").strip()
+            clean_term = term.replace("next_", "").strip()
             fun = self.fuzzy_model._outputfunctions[function_str]
 
             for var in self.obs_var_index.keys():
@@ -235,6 +237,10 @@ class FuzzyPOMDP(PomdpEM):
 
     def _marginal_likelihood(self, observation, state, obs_idx):
         """Compute the marginal likelihood of an observation given a state"""
+
+        variance = np.diag(self.obs_covs[state])[obs_idx]
+        safe_scale = np.sqrt(max(variance, 1e-10))
+
         marginal_likelihood = norm.pdf(
             observation,
             loc=self.obs_means[state][obs_idx],
@@ -277,7 +283,7 @@ class FuzzyPOMDP(PomdpEM):
                         mean_copy = np.copy(self.obs_means[s])
                         mean_copy[idx] = cons_s
                         pdf_s_prime = self._marginal_likelihood(cons_s, s_prime, idx)
-                        pseudo_count_O_mean[s_prime, :] += strength * mean_copy * pdf_s_prime
+                        pseudo_count_O_mean[s_prime, :] += strength * mean_copy
                         pseudo_count_T[s, a, s_prime] += match_score * pdf_s_prime
 
                         pseudo_count_O_cov[s_prime, :, :] += strength * np.outer(mean_copy, mean_copy)
@@ -332,7 +338,6 @@ class FuzzyPOMDP(PomdpEM):
         # Transitions
         if self.fix_transitions is None:
             lambda_T_reshaped = self.lambda_T[:, None, None]
-            self.transition_inertia = 20
             inertia_matrix = np.eye(self.n_states) * self.transition_inertia
             inertia_tensor = np.repeat(inertia_matrix[:, np.newaxis, :], self.n_actions, axis=1)
 
@@ -347,7 +352,7 @@ class FuzzyPOMDP(PomdpEM):
                 continue
             if self.fix_observations is None:
                 den_O = emp_N_O[s] + self.lambda_O[s] * fuzzy_N_O[s] + self.epsilon_prior
-                mean_O = (emp_Sum_O[s] + self.lambda_O[s] * fuzzy_Sum_O[s] + self.epsilon_prior) / den_O
+                mean_O = (emp_Sum_O[s] + self.lambda_O[s] * fuzzy_Sum_O[s]) / den_O
                 self.obs_means[s] = mean_O
 
                 if self.use_fuzzy and self.hp_method != "empirical_bayes":
@@ -359,6 +364,7 @@ class FuzzyPOMDP(PomdpEM):
                 # Ensure covariance matrix is positive definite
                 if self.ensure_psd:
                     cov_O = self._ensure_psd(cov_O)
+                    cov_O += self.epsilon_prior * np.eye(self.obs_dim)
                 else:
                     cov_O += self.epsilon_prior * np.eye(self.obs_dim)
 
@@ -436,7 +442,7 @@ class FuzzyPOMDP(PomdpEM):
                     # Transitions
                     delta_T = np.abs(curr_T_counts[s] - self.prev_fuzzy_counts_T[s])
                     D_s_T = np.mean(delta_T)
-                    sigma_data = np.trace(self.obs_covs[s]) + 1e-6
+                    sigma_data = np.trace(self.obs_covs[s]) + self.epsilon_prior
                     normalized_volatility_T = (D_s_T / sigma_data)
 
                     decay_T = 1.0 / (1.0 + self.alpha_ah * normalized_volatility_T)
@@ -515,17 +521,18 @@ class FuzzyPOMDP(PomdpEM):
             kappa_n = kappa_0 + n_emp
             nu_n = nu_0 + n_emp
             mu_n = (kappa_0 * mu_0 + n_emp * mu_data) / (kappa_0 + n_emp)
-            psi_n = psi_0 + psi_data + ((kappa_0 * n_emp) / (kappa_0 + n_emp)) * np.outer(diff_mu_data_0,
-                                                                                          diff_mu_data_0)
+            psi_n = (psi_0 + psi_data + ((kappa_0 * n_emp) / (kappa_0 + n_emp)) * np.outer(diff_mu_data_0,
+                                                                                           diff_mu_data_0)
+                     + self.epsilon_prior * np.eye(self.obs_dim))
 
             # Gradient computation
 
             # Precompute determinants and inverse
             det_psi_0 = np.linalg.det(psi_0)
             det_psi_n = np.linalg.det(psi_n)
-            ln_det_ratio = np.log(det_psi_0 + self.epsilon_prior) - np.log(det_psi_n + self.epsilon_prior)
+            ln_det_ratio = np.log(det_psi_0) - np.log(det_psi_n)
 
-            inv_psi_n = np.linalg.inv(psi_n + self.epsilon_prior * np.eye(self.obs_dim))
+            inv_psi_n = np.linalg.inv(psi_n)
 
             #
             term_1 = n_fuzzy / 2 * (
@@ -536,7 +543,7 @@ class FuzzyPOMDP(PomdpEM):
 
             term_2 = (self.obs_dim * n_emp * n_fuzzy) / (2 * kappa_0 * kappa_n)
 
-            term_3 = (nu_0 * self.obs_dim) / (2 * self.lambda_O[s] + + self.epsilon_prior)
+            term_3 = (nu_0 * self.obs_dim) / (2 * self.lambda_O[s] + self.epsilon_prior)
 
             diff_mu_mul = np.outer(diff_mu_data_0, diff_mu_data_0)
             scalar_factor = ((n_emp ** 2 * n_fuzzy) / kappa_n ** 2)
