@@ -28,7 +28,7 @@ from pomdp_example import *
 from utils.metrics import compute_error_metrics, visualize_L1_trials, visualize_KL_trials, plot_grid_search_heatmap, \
     plot_1d_sensitivity
 
-
+obs_index = {"test": 0, "symptoms": 1}
 class SyntheticEnvironment:
     def __init__(self, config, distribution_type="mvn"):
         self.n_states = config['n_states']
@@ -153,8 +153,8 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
 
     fuzzy_model = build_fuzzymodel(env.pomdp,
                                    seed=seed)
-    test_df = collect_data(pomdp=env.pomdp, trials=1500, horizon=3, target_per_state=0, state_in_df=True)
-    _evaluate_model(fuzzy_model, test_df)
+    #test_df = collect_data(pomdp=env.pomdp, trials=1500, horizon=3, target_per_state=0, state_in_df=True)
+    #_evaluate_model(fuzzy_model, test_df)
 
     np.random.seed(seed)
     random.seed(seed)
@@ -190,6 +190,8 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
                                        verbose=verbose,
                                        seed=seed,
                                        fuzzy_model=fuzzy_model,
+                                       ensure_psd=True,
+                                       obs_var_index=obs_index,
                                        **params)
                 elif model_cls == "PomdpMAPEM":
                     model = PomdpMAPEM(n_states=env.n_states,

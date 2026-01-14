@@ -77,7 +77,7 @@ def collect_data(
             count[next_state.name] += 1
 
             trajectory_step = {
-                'test_result': observation[0],
+                'test': observation[0],
                 'symptoms': observation[1],
                 'action': action_idx,
                 'reward': reward,
@@ -114,7 +114,7 @@ def build_fuzzymodel(
 ):
     """
     Costruisce un modello fuzzy generico.
-    - inputs: lista dei nomi delle variabili di input (default: ['test_result','symptoms','action'])
+    - inputs: lista dei nomi delle variabili di input (default: ['test','symptoms','action'])
     - outputs: lista dei nomi degli output da modellare (default: ['next_test','next_symptoms'])
     - salva opzionalmente il dataframe in `save_excel`
     Ritorna il modello combinato (pyFUME FIS model).
@@ -123,7 +123,7 @@ def build_fuzzymodel(
     random.seed(seed)
 
     if inputs is None:
-        inputs = ['test_result', 'symptoms', 'action']
+        inputs = ['test', 'symptoms', 'action']
     if outputs is None:
         outputs = ['next_test', 'next_symptoms']
 
@@ -204,10 +204,10 @@ def build_fuzzymodel(pomdp=None, seed=42):
     df = collect_data(trials=200, horizon=3, pomdp=pomdp)
     df["action"] = df["action"].astype("category")
     # df to excel
-    df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
-    df_test = df[["test_result", "symptoms", "action", "next_test"]]
+    df[["test", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
+    df_test = df[["test", "symptoms", "action", "next_test"]]
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
-                 variable_names=['test_result', 'symptoms', 'action', 'next_test'],
+                 variable_names=['test', 'symptoms', 'action', 'next_test'],
                  verbose=False)
 
     #print("the mean squared error of the created model is", FIS.calculate_error("MSE"))
@@ -216,9 +216,9 @@ def build_fuzzymodel(pomdp=None, seed=42):
 
     #Add the rules of the FIS model to include the next_symptoms as output variable
     for out in ["next_symptoms"]:
-        df_test = df[["test_result", "symptoms", "action", out]]
+        df_test = df[["test", "symptoms", "action", out]]
         dl = DataLoader(dataframe=df_test,
-                        variable_names=['test_result', 'symptoms', 'action', out], verbose=False)
+                        variable_names=['test', 'symptoms', 'action', out], verbose=False)
         variable_names = dl.variable_names
 
         # Split the data using the hold-out method in a training (default: 75%)
@@ -283,7 +283,7 @@ def _predict(model, input_data):
 
 def _evaluate_model(model, df, inputs=None, outputs=None):
     if inputs is None:
-        inputs = ['test_result', 'symptoms', 'action']
+        inputs = ['test', 'symptoms', 'action']
     if outputs is None:
         outputs = ['next_test', 'next_symptoms']
 
