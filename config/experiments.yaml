@@ -10,7 +10,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: [ "healthy", "sick",  "critical" ]
-    observations: [ "test_result", "symptoms" ]
+    observations: [ "test", "symptoms" ]
     actions: [ "wait", "treat" ]
     distribution_type: "mvn"
     true_transitions:
@@ -32,7 +32,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: [ "healthy", "sick",  "critical" ]
-    observations: [ "test_result", "symptoms" ]
+    observations: [ "test", "symptoms" ]
     actions: [ "wait", "treat" ]
     distribution_type: "mvn"
     true_transitions:
@@ -55,7 +55,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: [ "healthy", "sick",  "critical" ]
-    observations: [ "test_result", "symptoms" ]
+    observations: [ "test", "symptoms" ]
     actions: [ "wait", "treat" ]
     distribution_type: "mvn"
     true_transitions:
@@ -78,7 +78,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: [ "healthy", "sick",  "critical" ]
-    observations: [ "test_result", "symptoms" ]
+    observations: [ "test", "symptoms" ]
     actions: [ "wait", "treat" ]
     distribution_type: "mvn"
     true_transitions:
@@ -102,7 +102,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: ["healthy", "sick",  "critical"]
-    observations: ["test_result", "symptoms"]
+    observations: ["test", "symptoms"]
     actions: ["wait", "treat"]
     distribution_type: "beta"
     true_transitions:
@@ -126,7 +126,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: ["healthy", "sick",  "critical"]
-    observations: ["test_result", "symptoms"]
+    observations: ["test", "symptoms"]
     actions: ["wait", "treat"]
     distribution_type: "beta"
     true_transitions:
@@ -135,13 +135,13 @@ environments:
       - [[0.05, 0.05, 0.90], [0.10, 0.65, 0.25]]
     true_observations:
         - healthy:
-             test_result: [2.0, 10]
+             test: [2.0, 10]
              symptoms: [2, 10]
           sick:
-             test_result: [7, 7]
+             test: [7, 7]
              symptoms: [7, 7]
           critical:
-             test_result: [10, 2]
+             test: [10, 2]
              symptoms: [10, 2.5]
 
   - name: "env_hard_healthcare"
@@ -149,7 +149,7 @@ environments:
     n_actions: 2
     obs_dim: 2
     states: ["healthy", "sick",  "critical"]
-    observations: ["test_result", "symptoms"]
+    observations: ["test", "symptoms"]
     actions: ["wait", "treat"]
     distribution_type: "beta"
     true_transitions:
@@ -158,24 +158,24 @@ environments:
       - [[0.10, 0.15, 0.75], [0.20, 0.55, 0.25]]
     true_observations:
         - healthy:
-             test_result: [2, 6]
+             test: [2, 6]
              symptoms: [2, 6]
           sick:
-             test_result: [2.8, 4.0]
+             test: [2.8, 4.0]
              symptoms: [7, 3]
           critical:
-             test_result: [6, 2.0]
+             test: [6, 2.0]
              symptoms: [6, 2]
 
 experiments:
   data_efficiency_study:
-    active: False
+    active: True
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
     environments: ["env_standard_healthcare_mvn"]
     sequence_length: 3
 
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
-    noise_level: [0.01, 0.05, 0.1]
+    noise_level: [0.01]
     n_trials: 40
 
     standard_params:
@@ -194,7 +194,7 @@ experiments:
 
       - name: "Standard MAP"
         class: "PomdpMAPEM"
-        active: True
+        active: False
         params:
           parallel: False
           prior_alpha: 1.5
@@ -204,7 +204,7 @@ experiments:
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
-        active: True
+        active: False
         color: "red"
         marker: "s"
         params: &default_fuzzy_params
@@ -231,7 +231,7 @@ experiments:
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
-        active: True
+        active: False
         color: "cyan"
         marker: "^"
         params:
@@ -243,15 +243,15 @@ experiments:
           lambda_T: 0.25
           lambda_O: 0.05
   data_efficiency_study2:
-    active: True
+    active: False
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
     environments: ["env_medium_healthcare_mvn"]
     sequence_length: 3
 
 
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
-    noise_level: [0.01, 0.05, 0.1]
-    n_trials: 40
+    noise_level: [0.01]
+    n_trials: 5
 
     standard_params:
         n_iterations: 500
@@ -279,13 +279,13 @@ experiments:
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
-        active: True
+        active: False
         color: "red"
         marker: "s"
         params: &default_fuzzy_params2
           use_fuzzy: True
           parallel: False
-          lambda_T: 0.8
+          lambda_T: 0.25
           lambda_O: 0.05
           hyperparameter_update_method: "static"
           integration_method: "mean"
@@ -301,12 +301,12 @@ experiments:
           hyperparameter_update_method: "adaptive"
           integration_method: "mean"
           alpha_ah: 0.1
-          lambda_T: 0.8
+          lambda_T: 0.25
           lambda_O: 0.05
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
-        active: True
+        active: False
         color: "cyan"
         marker: "^"
         params:
@@ -315,7 +315,7 @@ experiments:
           integration_method: "mean"
           eb_learning_rate_T: 0.0005
           eb_learning_rate_O: 0.0000005
-          lambda_T: 0.8
+          lambda_T: 0.25
           lambda_O: 0.05
   data_efficiency_study3:
     active: False
@@ -500,5 +500,5 @@ experiments:
             alpha_ah: [0.01, 0.05, 0.1, 0.15, 0.20, 0.35, 0.5, 0.75, 1.0]
 
 variable_mappings:
-  test_result: 0
+  test: 0
   symptoms: 1
