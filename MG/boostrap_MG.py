@@ -5,7 +5,6 @@ from joblib import Parallel, delayed
 
 import models.trainable.fuzzy_EM
 from MG.MG_FM import build_fuzzy_model, _simulate_data
-from MG.fuzzy_EM import FuzzyPOMDP
 
 obs_var_index = {
     "Teff": 0, "Treg": 1, "B": 2, "GC": 3, "SLPB": 4,
@@ -15,19 +14,19 @@ SYMPTOMS_IDX = obs_var_index["Symptoms"]
 
 
 def run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=2, n_actions=2):
-    seed = 125405
+    seed = 5
     random.seed(seed)
     np.random.seed(seed)
 
     fuzzy_model = build_fuzzy_model()
-    observations, actions = _simulate_data(fuzzy_model, 500, 8)
+    observations, actions = _simulate_data(fuzzy_model, 55, 8)
     obs_dim = len(observations[0][0])
     n_sequences = len(observations)
 
-    print(f"Running {n_bootstrap_samples} bootstrap samples in parallel using {12} jobs...")
+    print(f"Running {n_bootstrap_samples} bootstrap samples in parallel using {14} jobs...")
     trained_models = []
     # Use joblib to run the training in parallel
-    trained_models = Parallel(n_jobs=12)(
+    trained_models = Parallel(n_jobs=14)(
        delayed(_train_single_bootstrap_model)(
            i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
        ) for i in range(n_bootstrap_samples))
@@ -59,18 +58,21 @@ def _train_single_bootstrap_model(sample_index, observations, actions, n_sequenc
 
     # Initialize and train a new POMDP model on the bootstrap sample
     bootstrap_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(n_states=n_states, n_actions=n_actions, obs_dim=obs_dim,
-                                                           use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=0.50,
-                                                           lambda_O=0.50, hyperparameter_update_method="static",
-                                                           parallel=False, obs_var_index=obs_var_index,
-                                                           epsilon_prior=1e-3, ensure_psd=True)
+                                                           use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=0.5,
+                                                           lambda_O=0.5, hyperparameter_update_method="adaptive",
+                                                           parallel=False, obs_var_index=obs_var_index, ensure_psd=True)
 
     bootstrap_pomdp.initialize_with_kmeans(bootstrap_obs)
+    for a in range(bootstrap_pomdp.n_actions):
+        bootstrap_pomdp.transitions[:, a, :] = np.array([[0.5, 0.25, 0.25],
+                                                     [0.25, 0.5, 0.25],
+                                                     [0.25, 0.25, 0.5]])
 
     bootstrap_pomdp.fit(
         bootstrap_obs,
         bootstrap_actions,
-        max_iterations=100,
-        tolerance=1e-2
+        max_iterations=300,
+        tolerance=1e-3
     )
 
     print(f"--- Finished Bootstrap Sample {sample_index + 1} ---")
@@ -85,8 +87,8 @@ def _analyze_bootstrap_transitions(trained_models):
         trained_models (list): A list of trained FuzzyPOMDP models from the bootstrap.
     """
     # Store the probabilities for staying in state 0 for each action
-    trans_2_to_1_a0 = []  # Action 0 (Wait)
-    trans_2_to_1_a1 = []  # Action 1 (Ravu)
+    stay_2_a0 = []  # Action 0 (Wait)
+    stay_2_a1 = []  # Action 1 (Ravu)
     trans_2_to_0_a0 = []  # Action 0 (Wait)
     trans_2_to_0_a1 = []  # Action 1 (Ravu)
 
@@ -98,11 +100,15 @@ def _analyze_bootstrap_transitions(trained_models):
         idx_sick = sorted_indices[1]
         idx_critical = sorted_indices[2]
 
-        # Critical to Sick
-        p_21_a0 = model.transitions[idx_critical, 0, idx_sick]
-        trans_2_to_1_a0.append(p_21_a0)
-        p_21_a1 = model.transitions[idx_critical, 1, idx_sick]
-        trans_2_to_1_a1.append(p_21_a1)
+        if (np.max(symptoms_means) - np.min(symptoms_means)) < 0.2:
+            print("Skipping model with insufficient state separation.")
+            continue
+
+        # Critical to Critical
+        p_22_a0 = model.transitions[idx_critical, 0, idx_critical]
+        stay_2_a0.append(p_22_a0)
+        p_22_a1 = model.transitions[idx_critical, 1, idx_critical]
+        stay_2_a1.append(p_22_a1)
 
         # Critical to Healthy
         p_20_a0 = model.transitions[idx_critical, 0, idx_healthy]
@@ -110,7 +116,7 @@ def _analyze_bootstrap_transitions(trained_models):
         p_20_a1 = model.transitions[idx_critical, 1, idx_healthy]
         trans_2_to_0_a1.append(p_20_a1)
 
-    _print_stats("Critical -> Sick", trans_2_to_1_a0, trans_2_to_1_a1)
+    _print_stats("Critical -> Critical", stay_2_a0, stay_2_a1)
 
     # Analyze 2 -> 0
     _print_stats("Critical -> Healthy", trans_2_to_0_a0, trans_2_to_0_a1)
@@ -142,8 +148,8 @@ def main():
     """
     # best_model = run_pomdp_reconstruction()
 
-    boostraap_models = run_pomdp_with_bootstrap(n_bootstrap_samples=40, n_states=3, n_actions=2)
-    return boostraap_models
+    bootstrap_models = run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=3, n_actions=2)
+    return bootstrap_models
 
 
 if __name__ == "__main__":
