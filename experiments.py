@@ -206,6 +206,8 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
 
                 start_time = time.time()
                 #TODO: add the kmeans initialization if necessary
+                #model.initialize_with_kmeans(observations=obs)
+
                 fit_ll = model.fit(obs, acts,
                                    max_iterations=standard_param["n_iterations"],
                                    tolerance=float(standard_param["tolerance"]))
@@ -328,6 +330,7 @@ def main():
             env_config = [e for e in environments if e['name'] == env_name][0]
             results_summary[exp_id][env_name] = {}
 
+            config_models = exp_config["models"]
             standard_param = exp_config.get("standard_params", {})
             # One task per (Dataset Size,  noise_level,  n_trial)
             # Each task will run ALL batch_configs on that specific dataset
@@ -350,7 +353,7 @@ def main():
                         results_summary[exp_id][env_name][m_name] = []
                     results_summary[exp_id][env_name][m_name].append(res)
         else:
-            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 6)) as executor:
+            with ProcessPoolExecutor(max_workers=min(15, 32)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
@@ -431,7 +434,6 @@ def main():
                                   f"Final LL: {res['final_log_likelihood']:.2f}, "
                                   f"Training Time (s): {res['training_time_sec']:.2f}, "
                                   f"Metrics: {res['metrics']}")
-
 
 if __name__ == "__main__":
     main()
