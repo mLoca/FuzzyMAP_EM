@@ -41,7 +41,7 @@ def collect_data(
 
         # esegui episodio
         total_reward = 0
-        for step in range(horizon):
+        for step in range(horizon-1):
             # calcola scelte possibili per bilanciare i conteggi
             choices = []
             deficits = {s: max(0, target_per_state - c) for s, c in count.items()}
@@ -51,17 +51,23 @@ def collect_data(
 
             action_idx = random.randint(0, len(ACTIONS) - 1)
             action = ACTIONS[action_idx]
+            applied_transition = False
 
+            if len(choices) == 0:
+                reward = pomdp.env.state_transition(action, execute=True)
+                next_state = pomdp.env.state
+            else:
+                for _ in range(len(choices)):
+                    cand_next_state, cand_reward = pomdp.env.state_transition(action, execute=False)
+                    if cand_next_state.name in choices:
+                        pomdp.env.apply_transition(cand_next_state)
+                        next_state = pomdp.env.state
+                        reward = cand_reward
+                        applied_transition = True
+                        break
             # esegui transizione una volta per passo
-            i = 0
-            reward = 0
-            for i in range(len(choices)):
-                next_state, reward = pomdp.env.state_transition(action, execute=False)
-                if getattr(next_state, "name", None) in choices:
-                    pomdp.env.apply_transition(next_state)
-                    break
-
-            if i == len(choices) - 1 or len(choices) == 0:
+            if not applied_transition:
+                # fallback to performing the real transition
                 reward = pomdp.env.state_transition(action, execute=True)
                 next_state = pomdp.env.state
 
@@ -196,18 +202,12 @@ def build_fuzzymodel(pomdp=None, seed=42):
 
     nr_clus = 5
     df = collect_data(trials=200, horizon=3, pomdp=pomdp)
-    print(df[['test_result', 'next_test']].corr())
     df["action"] = df["action"].astype("category")
-    #df["action"] = df["action"].apply(lambda x: f"Act_{x}").astype("category")
     # df to excel
     df[["test_result", "symptoms", "action", "next_test", "next_symptoms"]].to_excel("data.xlsx", index=False)
-    #df["action"] = df["action"].apply(lambda x: f"Act_{x}").astype("category")
-
     df_test = df[["test_result", "symptoms", "action", "next_test"]]
-
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
                  variable_names=['test_result', 'symptoms', 'action', 'next_test'],
-                 process_variables=True,
                  verbose=False)
 
     #print("the mean squared error of the created model is", FIS.calculate_error("MSE"))
