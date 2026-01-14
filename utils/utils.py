@@ -44,8 +44,6 @@ def from_observation_config_to_observation(observation_config, states=None, obs_
     return obs
 
 
-
-
 def from_beta_to_multivariate_normal(beta):
     """
     Convert beta parameters to a multivariate normal distribution.
