@@ -70,7 +70,7 @@ class PomdpMAPEM(PomdpEM):
 
         num = emp_N_T + self.prior_alpha - 1.0
         den = np.sum(num, axis=2, keepdims=True)
-        den[den == 0] = 1.0  # To avoid division by zero
+        den[den == 0] = 1.0
         self.transitions = num / den
 
         # Observations
