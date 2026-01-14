@@ -233,7 +233,7 @@ def visualize_L1_trials(results, noise_level=0.01, env_name='', folder_name=''):
         linewidth=2,
         style='Model'
     )
-    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1)
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1, vmin=0, vmax=1.2)
     plt.ylim([_vmin, _vmax])
     plt.title('Impact of Data Size on Model Error (L1) - Noise Level: ' + str(noise_level))
     plt.xlabel('Data Size')
@@ -241,7 +241,7 @@ def visualize_L1_trials(results, noise_level=0.01, env_name='', folder_name=''):
     plt.legend(title='Model Type',
                frameon=True,
                loc='upper right',
-               framealpha=0.85
+               framealpha=0.8
                )
     path = folder_name + env_name + '_SD' + str(noise_level) + '_L1_error_plot.png'
     plt.savefig(path, bbox_inches='tight', pad_inches=0.05)
@@ -292,7 +292,7 @@ def visualize_KL_trials(results, noise_level='', env_name='',  folder_name=''):
         linewidth=2,
         style='Model',
     )
-    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1)
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1, vmin=0, vmax=12.0)
     plt.ylim([_vmin, _vmax])
     plt.title('Impact of Data Size on KL Divergence -  Noise Level: ' + str(noise_level))
     plt.xlabel('Data Size')
@@ -300,10 +300,10 @@ def visualize_KL_trials(results, noise_level='', env_name='',  folder_name=''):
     plt.legend(title='Model Type',
                frameon=True,
                loc='upper right',
-               framealpha=0.85)
-    plt.tight_layout()
+               framealpha=0.8)
     plt.savefig(folder_name+env_name + '_SD' + str(noise_level) + '_KL_error_plot.png',
                 bbox_inches='tight', pad_inches=0.05)
+    plt.tight_layout()
     plt.show()
 
 
@@ -412,7 +412,13 @@ def _compute_lim_from_values(values, margin=0.1, vmax=None, vmin=None):
 
 
 def _compute_lim_from_ci(plot_obj, margin=0.1, vmax=None, vmin=None):
-    vertices = plot_obj.collections[0].get_paths()[0].vertices
-    y_min, y_max = _compute_lim_from_values(vertices[:, 1], margin=margin, vmax=vmax, vmin=vmin)
+    all_vertices = np.empty((0, 2))
+    if len(plot_obj.collections) > 1:
+        for coll in plot_obj.collections:
+            vertices = coll.get_paths()[0].vertices
+            all_vertices = np.concatenate((all_vertices, vertices), axis=0)
+    else:
+        all_vertices = plot_obj.collections[0].get_paths()[0].vertices
+    y_min, y_max = _compute_lim_from_values(all_vertices[:, 1], margin=margin, vmax=vmax, vmin=vmin)
 
     return y_min, y_max
