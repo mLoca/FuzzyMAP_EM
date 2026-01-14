@@ -9,13 +9,14 @@ from scipy.special import digamma
 from scipy.stats import norm
 from sklearn.metrics import r2_score, root_mean_squared_error
 
+from models.trainable.pomdp_EM import PomdpEM
 from utils import utils
 from continouos_pomdp_example import State, MedicalRewardModel, MedicalTransitionModel, MedAction
 from continouos_pomdp_example import (generate_pomdp_data,
                                       STATES, ACTIONS, ContinuousObservationModel)
 from fuzzy.fuzzy_model import build_fuzzymodel
 from utils.utils import _prob_sum, multidigamma
-from .pomdp_EM import PomdpEM
+
 
 DEFAULT_PARAMS_TRANS = [
     [[0.85, 0.14, 0.01],
@@ -54,7 +55,7 @@ class FuzzyPOMDP(PomdpEM):
                  hyperparameter_update_method="static",  # 'static', 'adaptive', 'empirical_bayes'
                  eb_learning_rate_O=0.01,
                  eb_learning_rate_T=0.01,
-                 alpha_ah=0.1,
+                 alpha_ah=0.05,
                  lambda_min=0.0,
                  epsilon_prior=1e-4
                  ):
@@ -331,8 +332,11 @@ class FuzzyPOMDP(PomdpEM):
         # Transitions
         if self.fix_transitions is None:
             lambda_T_reshaped = self.lambda_T[:, None, None]
+            self.transition_inertia = 20
+            inertia_matrix = np.eye(self.n_states) * self.transition_inertia
+            inertia_tensor = np.repeat(inertia_matrix[:, np.newaxis, :], self.n_actions, axis=1)
 
-            num = emp_N_T + fuzzy_N_T * lambda_T_reshaped
+            num = emp_N_T + fuzzy_N_T * lambda_T_reshaped + inertia_tensor
             den = np.sum(num, axis=2, keepdims=True)
             den[den == 0] = 1.0  # To avoid division by zero
             self.transitions = num / den
@@ -434,7 +438,6 @@ class FuzzyPOMDP(PomdpEM):
                     D_s_T = np.mean(delta_T)
                     sigma_data = np.trace(self.obs_covs[s]) + 1e-6
                     normalized_volatility_T = (D_s_T / sigma_data)
-
 
                     decay_T = 1.0 / (1.0 + self.alpha_ah * normalized_volatility_T)
                     # Observations
@@ -887,7 +890,6 @@ def main():
     """
     best_model = run_pomdp_reconstruction()
     return best_model
-
 
 
 if __name__ == "__main__":

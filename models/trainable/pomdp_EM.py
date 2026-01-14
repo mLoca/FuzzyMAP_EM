@@ -265,7 +265,6 @@ class PomdpEM:
     def fit(self, observations, actions, max_iterations=100, tolerance=1e-4):
         """Run EM algorithm to fit the POMDP model parameters"""
         prev_ll = -np.inf
-        sleep(1)
         try:
             for iteration in range(max_iterations):
                 # E-step
@@ -304,11 +303,15 @@ class PomdpEM:
         if min_val is None:
             min_val = self.epsilon_prior
 
-        # Symmetrize add regularization to diagonal
         sigma = 0.5 * (sigma + sigma.T)
-        sigma = sigma + min_val * np.eye(sigma.shape[0])
-
-        return sigma
+        try:
+            eigvals, eigvecs = np.linalg.eigh(sigma)
+            eigvals = np.maximum(eigvals, min_val)
+            sigma_psd = (eigvecs * eigvals) @ eigvecs.T
+            return sigma_psd
+        except np.linalg.LinAlgError:
+            # Fallback if decomposition fails: diagonal loading
+            return sigma + np.eye(sigma.shape[0]) * min_val
     #TODO: refactor this function to be cleaner
     #TODO: move to a visualization module
     def compare_state_transitions(self, learned_transitions, baseline_transitions, baseline_observations, states_list,
