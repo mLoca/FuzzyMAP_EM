@@ -22,8 +22,8 @@ class PomdpEM:
     """
 
     def __init__(self, n_states: int, n_actions: int, obs_dim: int, verbose: bool = False, seed: int = 42,
-                 parallel: bool = False, epsilon_prior = 1e-4,
-                 ensure_psd = False):
+                 parallel: bool = False, epsilon_prior=1e-4,
+                 ensure_psd=False):
         """Initialize the POMDP model with EM capabilities"""
         self.ensure_psd = ensure_psd
         self.n_states = n_states
@@ -312,6 +312,7 @@ class PomdpEM:
         except np.linalg.LinAlgError:
             # Fallback if decomposition fails: diagonal loading
             return sigma + np.eye(sigma.shape[0]) * min_val
+
     #TODO: refactor this function to be cleaner
     #TODO: move to a visualization module
     def compare_state_transitions(self, learned_transitions, baseline_transitions, baseline_observations, states_list,
