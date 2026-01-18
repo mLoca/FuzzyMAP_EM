@@ -7,7 +7,6 @@ from scipy.stats import norm
 
 import models.trainable.fuzzy_EM
 
-
 from MG.MG_FM import _simulate_data, build_fuzzy_model
 
 OBS_LIST = [
@@ -59,47 +58,29 @@ def run_pomdp_reconstruction():
     # Generate training data
     fuzzy_model = build_fuzzy_model()
 
-    observations, actions = _simulate_data(fuzzy_model, 40, 8)
+    observations, actions = _simulate_data(fuzzy_model, 200, 8)
     obs_dim = len(observations[0][0])
 
     # Train fuzzy POMDP model
-    fuzzy_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(
-        n_states=n_states,
-        n_actions=n_actions,
-        obs_dim=obs_dim,
-        use_fuzzy=True,  # Set to True if using fuzzy model
-        fuzzy_model=fuzzy_model,
-        lambda_T=0.25,
-        lambda_O=0.25,
-        verbose=True,
-        obs_var_index=obs_var_index,
-        parallel=False,
-        integration_method="mean",
-        hyperparameter_update_method="adaptive",
-        ensure_psd=True
-    )
+    fuzzy_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(n_states=n_states, n_actions=n_actions, obs_dim=obs_dim,
+                                                       use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=0.20,
+                                                       lambda_O=0.80, verbose=True, obs_var_index=obs_var_index,
+                                                       parallel=False, hyperparameter_update_method="adaptive",
+                                                       ensure_psd=True)
 
     fuzzy_pomdp.initialize_with_kmeans(observations)
 
     for a in range(fuzzy_pomdp.n_actions):
-        #fuzzy_pomdp.transitions[:, a, :] = np.array([[0.85, 0.15],
-        #                                             [0.15, 0.85]])
-        fuzzy_pomdp.transitions[:, a, :] = np.array([[0.50, 0.25, 0.25],
-                                                     [0.25, 0.50, 0.25],
-                                                    [0.25, 0.25, 0.50]])
+        fuzzy_pomdp.transitions[:, a, :] = np.array([[0.55, 0.25, 0.2],
+                                                     [0.2, 0.6, 0.2],
+                                                     [0.2, 0.25, 0.55]])
+
+    fuzzy_pomdp.transition_inertia = 65
     fuzzy_ll = fuzzy_pomdp.fit(
         observations, actions,
-        max_iterations=300, tolerance=1e-4
+        max_iterations=300, tolerance=1e-3
     )
 
-    fuzzy_pomdp.lambda_T = np.zeros(n_states)
-    fuzzy_pomdp.lambda_O = np.zeros(n_states)
-
-    #fuzzy_ll = fuzzy_pomdp.fit(
-    #    observations, actions,
-    #    max_iterations=1, tolerance=1e-4
-    #)
-#
     visualize_observation_distributions_per_state(fuzzy_pomdp, n_states, obs_dim, title_prefix="Fuzzy")
     for s in range(fuzzy_pomdp.n_states):
         for a in range(fuzzy_pomdp.n_actions):
@@ -107,13 +88,12 @@ def run_pomdp_reconstruction():
                 print(
                     f"Transition probabilities from state {s}, action {a} to state {s_next}: {fuzzy_pomdp.transitions[s, a, s_next]}")
     visualize_covariance_matrices(fuzzy_pomdp, n_states, title_prefix="Fuzzy")
+    visualize_observation_distributions_per_state(fuzzy_pomdp, n_states, obs_dim, title_prefix="Fuzzy",
+                                                  index_to_exclude=[0, 1, 2, 3, 4, 5,
+                                                                    9])  # Exclude Teff, Treg, B, GC, SLPB, LLPC, Inflammation
     print(fuzzy_pomdp.transitions)
 
     return fuzzy_pomdp
-
-
-
-
 
 
 def visualize_covariance_matrices(model, n_states, title_prefix=""):
@@ -137,25 +117,34 @@ def visualize_covariance_matrices(model, n_states, title_prefix=""):
         plt.show()
 
 
-def visualize_observation_distributions_per_state(model, n_states, obs_dim, title_prefix=""):
+def visualize_observation_distributions_per_state(model, n_states, obs_dim, title_prefix="", index_to_exclude=None):
     """
     Visualize the observation distributions for each observation dimension across all states.
     """
     # Define the number of rows and columns for subplots
+    # Order the state by the means of the "Symptoms" observation
+    if index_to_exclude is None:
+        index_to_exclude = []
+
+    symptoms_means = model.obs_means[:, 8]
+    sorted_indices = np.argsort(symptoms_means)
+
     n_cols = 3  # Number of columns
-    n_rows = (obs_dim + n_cols - 1) // n_cols  # Calculate rows dynamically
+    n_rows = (obs_dim - len(index_to_exclude) + n_cols - 1) // n_cols  # Calculate rows dynamically
 
     plt.figure(figsize=(15, 5 * n_rows))
 
     for obs_idx in range(obs_dim):
         #check if is not ravu
-        if OBS_LIST[obs_idx] != "Ravu":
-            plt.subplot(n_rows, n_cols, obs_idx + 1)
+        if OBS_LIST[obs_idx] != "Ravu" and obs_idx not in index_to_exclude:
+            obs_plt_idx = obs_idx - sum(1 for i in index_to_exclude if i < obs_idx)
+            plt.subplot(n_rows, n_cols, obs_plt_idx + 1)
 
             # Create a range of values for the observation dimension
             x = np.linspace(0, 1, 100)
 
             # Plot the PDF for the observation dimension for each state
+
             for s in range(n_states):
                 y = [norm.pdf(val, loc=model.obs_means[s][obs_idx], scale=np.sqrt(model.obs_covs[s][obs_idx, obs_idx]))
                      for val in x]
