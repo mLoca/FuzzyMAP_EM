@@ -208,9 +208,9 @@ def _simulate_data(FS_model, trials=1, length=7):
             dynamics[var] = [dynamics[var]]
         # Perform Sugeno inference and save results
         step = 0
+        new_values = {}
         for T in np.linspace(0, 1, steps):
             FS.set_variable('Ravu', treatment)
-
             #choose the treatment action for the current step randomly
             #if step >= 0 and step in STEP_TO_SAVE:
             #   treatment = 0 if random() < 0.5 else 1
@@ -225,13 +225,6 @@ def _simulate_data(FS_model, trials=1, length=7):
             #       FS.set_variable('Ravu', np.abs(treatment - 1))
             #   index_step = STEP_TO_SAVE.index(step)
             #   action[index_step] = FS._variables['Ravu']
-
-            new_values = FS.Sugeno_inference()
-
-            for var in new_values.keys():
-                dynamics[var].append(new_values[var])
-            FS._variables.update(new_values)
-            # Perturbations can be added here using the set_variable method
             if step in STEP_TO_SAVE:
                 index_var = 0
                 index_step = STEP_TO_SAVE.index(step)
@@ -240,8 +233,15 @@ def _simulate_data(FS_model, trials=1, length=7):
                         if var == 'Inflammation':
                             observation[index_step, index_var] = FS._variables[var]
                         else:
-                            observation[index_step, index_var] = new_values[var]
+                            observation[index_step, index_var] = new_values[var] if step > 0 else FS._variables[var]
                         index_var += 1
+
+            new_values = FS.Sugeno_inference()
+
+            for var in new_values.keys():
+                dynamics[var].append(new_values[var])
+            FS._variables.update(new_values)
+            # Perturbations can be added here using the set_variable method
 
             step += 1
 
