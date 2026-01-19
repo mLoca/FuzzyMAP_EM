@@ -312,6 +312,7 @@ def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
                              title="Hyperparameter Grid Search",
                              exp_name="", folder_name="res/",
                              vmax=None):
+    sns.set_theme()
     data = []
     model_name = None
     for model_name, trails in experiment_results.items():
@@ -347,8 +348,8 @@ def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
     plt.figure(figsize=(10, 8))
 
     # Plot
-    _vmax = _compute_lim_from_values(pivot_table.values.flatten(), margin=0.1, vmax=vmax)[1]
-    ax = sns.heatmap(pivot_table, annot=True, fmt=".2f", cmap="viridis_r", vmax=_vmax)
+    _vmin, _vmax = _compute_lim_from_values(pivot_table.values.flatten(), margin=0.1, vmax=vmax, vmin=0)
+    ax = sns.heatmap(pivot_table, annot=True, fmt=".2f", cmap="viridis_r", vmax=_vmax, vmin=_vmin)
 
     # Format the tick labels
     ax.set_yticklabels([f"{y:.2f}" for y in pivot_table.index], rotation=0)
