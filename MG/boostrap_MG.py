@@ -24,7 +24,7 @@ def run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=2, n_actions=2):
     np.random.seed(seed)
 
     fuzzy_model = build_fuzzy_model()
-    observations, actions = _simulate_data(fuzzy_model, 200, 8)
+    observations, actions = _simulate_data(fuzzy_model, 100, 8)
     obs_dim = len(observations[0][0])
     n_sequences = len(observations)
 
@@ -32,10 +32,9 @@ def run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=2, n_actions=2):
     trained_models = []
     # Use joblib to run the training in parallel
     trained_models = Parallel(n_jobs=14)(
-       delayed(_train_single_bootstrap_model)(
-           i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
-       ) for i in range(n_bootstrap_samples))
-
+        delayed(_train_single_bootstrap_model)(
+            i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
+        ) for i in range(n_bootstrap_samples))
 
     #for i in range(n_bootstrap_samples):
     #    model = _train_single_bootstrap_model(
@@ -63,16 +62,18 @@ def _train_single_bootstrap_model(sample_index, observations, actions, n_sequenc
 
     # Initialize and train a new POMDP model on the bootstrap sample
     bootstrap_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(n_states=n_states, n_actions=n_actions, obs_dim=obs_dim,
-                                                           use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=0.2,
-                                                           lambda_O=0.8, hyperparameter_update_method="adaptive",
+                                                           use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=2,
+                                                           lambda_O=2, hyperparameter_update_method="adaptive",
                                                            parallel=False, obs_var_index=obs_var_index, ensure_psd=True)
 
     bootstrap_pomdp.initialize_with_kmeans(bootstrap_obs)
     for a in range(bootstrap_pomdp.n_actions):
         bootstrap_pomdp.transitions[:, a, :] = np.array([[0.55, 0.25, 0.2],
-                                                     [0.2, 0.6, 0.2],
-                                                     [0.2, 0.25, 0.55]])
-    bootstrap_pomdp.transition_inertia = 65
+                                                         [0.2, 0.6, 0.2],
+                                                         [0.2, 0.25, 0.55]])
+    bootstrap_pomdp.transition_inertia = 40
+    bootstrap_pomdp.obs_covs = np.array([np.eye(obs_dim) * 0.05 for _ in range(n_states)])
+
     bootstrap_pomdp.fit(
         bootstrap_obs,
         bootstrap_actions,
@@ -96,7 +97,7 @@ def _analyze_bootstrap_transitions(trained_models):
     trans_1_to_0_a1 = []  # Action 1 (Ravu)
     trans_2_to_0_a0 = []  # Action 0 (Wait)
     trans_2_to_0_a1 = []  # Action 1 (Ravu)
-    transitions ={}
+    transitions = {}
     for model in trained_models:
         symptoms_means = model.obs_means[:, SYMPTOMS_IDX]
         sorted_indices = np.argsort(symptoms_means)
@@ -117,11 +118,10 @@ def _analyze_bootstrap_transitions(trained_models):
 
                 for a in range(model.n_actions):
                     prob = model.transitions[i, a, j]
-                    key = f"{name_map[i]} to {name_map  [j]}"
+                    key = f"{name_map[i]} to {name_map[j]}"
                     if key not in transitions:
                         transitions[key] = {0: [], 1: []}
                     transitions[key][a].append(prob)
-
 
         # Sick to Healthy
         p_10_a0 = model.transitions[idx_sick, 0, idx_healthy]
@@ -142,7 +142,6 @@ def _analyze_bootstrap_transitions(trained_models):
 
     for key, values in transitions.items():
         _print_stats(key, values[0], values[1])
-
 
 
 def _print_stats(name, data_a0, data_a1):
