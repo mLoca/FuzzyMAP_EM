@@ -194,7 +194,7 @@ class PomdpEM:
         with ctx.Pool(processes=min(mp.cpu_count(), 8)) as pool:
             results = pool.starmap(
                 self._process_single_sequence,
-                [(obs_seq, act_seq) for obs_seq, act_seq in zip(observations, actions)]
+                [(np.array(obs_seq), np.array(act_seq)) for obs_seq, act_seq in zip(observations, actions)]
             )
 
         # Unpack results
@@ -304,6 +304,7 @@ class PomdpEM:
             min_val = self.epsilon_prior
 
         sigma = 0.5 * (sigma + sigma.T)
+        return sigma + np.eye(sigma.shape[0]) * min_val
         try:
             eigvals, eigvecs = np.linalg.eigh(sigma)
             eigvals = np.maximum(eigvals, min_val)
