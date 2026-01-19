@@ -58,15 +58,15 @@ def run_pomdp_reconstruction():
     # Generate training data
     fuzzy_model = build_fuzzy_model()
 
-    observations, actions = _simulate_data(fuzzy_model, 200, 8)
+    observations, actions = _simulate_data(fuzzy_model, 100, 8)
     obs_dim = len(observations[0][0])
 
     # Train fuzzy POMDP model
     fuzzy_pomdp = models.trainable.fuzzy_EM.FuzzyPOMDP(n_states=n_states, n_actions=n_actions, obs_dim=obs_dim,
-                                                       use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=0.20,
-                                                       lambda_O=0.80, verbose=True, obs_var_index=obs_var_index,
+                                                       use_fuzzy=True, fuzzy_model=fuzzy_model, lambda_T=2,
+                                                       lambda_O=2, verbose=True, obs_var_index=obs_var_index,
                                                        parallel=False, hyperparameter_update_method="adaptive",
-                                                       ensure_psd=True)
+                                                       ensure_psd=True, fix_observations=None)
 
     fuzzy_pomdp.initialize_with_kmeans(observations)
 
@@ -75,7 +75,8 @@ def run_pomdp_reconstruction():
                                                      [0.2, 0.6, 0.2],
                                                      [0.2, 0.25, 0.55]])
 
-    fuzzy_pomdp.transition_inertia = 65
+    fuzzy_pomdp.obs_covs = fuzzy_pomdp.obs_covs * 0.03
+    fuzzy_pomdp.transition_inertia = 40
     fuzzy_ll = fuzzy_pomdp.fit(
         observations, actions,
         max_iterations=300, tolerance=1e-3
