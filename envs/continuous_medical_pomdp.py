@@ -1,16 +1,11 @@
 import random
-
 import pomdp_py
 from pomdp_py import ObservationModel, Agent, Environment, POMDP
 import numpy as np
 from scipy.stats import beta, mvn, uniform, multivariate_normal
-import pandas as pd
-
-import seaborn as sns
-
 import matplotlib.pyplot as plt
 
-from pomdp_example import State, MedAction, MedicalTransitionModel, MedicalRewardModel, \
+from envs.medical_pomdp import State, MedAction, MedicalTransitionModel, MedicalRewardModel, \
     MedicalPolicyModel
 
 STATES = [State(s) for s in ["healthy", "sick", "critical"]]
@@ -70,8 +65,7 @@ class ContinuousObservationModel(ObservationModel):
             raise ValueError(f"Unsupported distribution type: {distribution}. "
                              f"Supported types are: {self._DIST_MAP}")
         self.distribution = distribution
-        # define  distribution parameters per state
-        # format: { state_name: (alpha_test, beta_test, alpha_symp, beta_symp) }
+
         if obs_params is None:
             self.params = DEFAULT_OBS_PARAMS
         else:
@@ -83,8 +77,6 @@ class ContinuousObservationModel(ObservationModel):
                         raise ValueError(f"Beta distribution requires 2 parameters for {dim} in state {state.name}")
 
             self.params = obs_params
-
-        #TODO: check the dimension of obs_params for each state
 
     def sample(self, next_state, action, **kwargs):
         dims = self.params[next_state.name]
@@ -102,7 +94,7 @@ class ContinuousObservationModel(ObservationModel):
             samples = multivariate_normal.rvs(mean=loc[1], cov=scale[1])
             samples = samples.clip(0, 1)
         else:
-            raise ValueError(f"Distribuzione non supportata: {self.distribution}")
+            raise ValueError(f"Distribution not supported: {self.distribution}")
         return np.asarray(samples)
 
     def probability(self, observation, next_state, action):
@@ -121,11 +113,9 @@ class ContinuousObservationModel(ObservationModel):
                 low, high = p
                 prob *= uniform.pdf(x, loc=low, scale=(high - low))
             else:
-                raise ValueError(f"Distribuzione non supportata: {self.distribution}")
+                raise ValueError(f"Distribution not supported:  {self.distribution}")
         return prob
 
-    #TODO: move to a file responsible to plotting
-    #TODO: make it general
     def plot_observation_distribution(self):
         # Plot the observation distribution for each state
         # Create a grid of subplots (2 rows: tests and symptoms, 3 columns: states)
@@ -251,68 +241,12 @@ class ContinuousObservationModel(ObservationModel):
         plt.show()
 
 
-#TODO: change the scope and generality of this function
-def generate_pomdp_data(n_trajectories, trajectory_length, noise_sd=0.01, seed=None, pomdp=None):
-    """Generate  data from POMDP model"""
-    if seed is not None:
-        random.seed(seed)
-        np.random.seed(seed)
-
-    print("Generating training data...")
-    observations = []
-    actions = []
-    true_states = []
-    rewards = []
-
-    for traj in range(n_trajectories):
-        # Reset environment for new trajectory
-        if pomdp is None:
-            pomdp = create_continuous_medical_pomdp()
-        else:
-            pomdp = reset_pomdp(pomdp)
-        pomdp.agent.set_belief(pomdp_py.Histogram({
-            State("healthy"): 1 / 3, State("sick"): 1 / 3, State("critical"): 1 / 3
-        }))
-
-        traj_observations, traj_actions = [], []
-        traj_states, traj_rewards = [], []
-
-        for _ in range(trajectory_length):
-            # Get current state
-            current_state = pomdp.env.state
-            traj_states.append(STATES.index(current_state))
-
-            # Select random action (for data collection)
-            action = random.choice(ACTIONS)
-            action_idx = ACTIONS.index(action)
-            traj_actions.append(action_idx)
-
-            # Execute action and get observation
-            reward = pomdp.env.state_transition(action, execute=True)
-            traj_rewards.append(reward)
-
-            # Get observation with noise
-            observation = pomdp.agent.observation_model.sample(pomdp.env.state, action)
-            noise = np.random.mvnal(0, noise_sd, size=len(observation))
-            noisy_observation = np.clip(observation + noise, 0, 1)
-            traj_observations.append(noisy_observation)
-
-        observations.append(np.array(traj_observations))
-        actions.append(np.array(traj_actions))
-        true_states.append(np.array(traj_states))
-        rewards.append(np.array(traj_rewards))
-
-    print(f"Generated {n_trajectories} trajectories of length {trajectory_length}")
-    return pomdp, observations, actions, true_states, rewards
-
-
 def create_continuous_medical_pomdp(init_state=None, states=None, trans_params=None, obs_params=None):
     if obs_params is None:
         obs_params = DEFAULT_OBS_PARAMS
     if trans_params is None:
         trans_params = DEFAULT_TRANS_PARAMS
 
-    # Assicurati di utilizzare le versioni configurabili dei modelli
     transition_model = MedicalTransitionModel(states, trans_params)
     reward_model = MedicalRewardModel()
     obs_model = ContinuousObservationModel(STATES, ACTIONS, obs_params)
@@ -359,71 +293,6 @@ def reset_pomdp(pomdp):
     )
 
 
-def plot_observation_distribution(n_samples=5000):
-    # Instantiate the continuous observation model
-    obs_model = ContinuousObservationModel(STATES, ACTIONS)
-
-    # Sample observations per state
-
-    records = []
-    for state in STATES:
-        for _ in range(n_samples):
-            test_val, symp_val = obs_model.sample(state, ACTIONS[0])
-            records.append({"state": state.name, "test_result": test_val, "symptoms": symp_val})
-
-    df = pd.DataFrame.from_records(records)
-
-    # Plot 2D KDE for each state
-    g = sns.FacetGrid(df, col="state", height=4, sharex=True, sharey=True)
-    g.map_dataframe(
-        sns.kdeplot,
-        x="test_result",
-        y="symptoms",
-        fill=True,
-        levels=6,
-        cmap="viridis"
-    )
-    g.set_axis_labels("Test result", "Symptoms")
-    g.tight_layout()
-    plt.show()
-
-
-def predict_next_observation_reward(fuzzy_model, current_observation, action):
-    # Convert observation to test result and symptoms values
-    action_val = fuzzy_model.action_mapping[action.name]
-    test_val = current_observation[0]
-    symptom_val = current_observation[1]
-
-    # Pass values to fuzzy system
-    fuzzy_model.prediction.input['action_input'] = action_val
-    fuzzy_model.prediction.input['test_result'] = test_val
-    fuzzy_model.prediction.input['symptoms'] = symptom_val
-
-    # Compute result
-    fuzzy_model.prediction.compute()
-
-    if len(fuzzy_model.prediction.output) == 0:
-        # Get outputs
-        next_test_val = test_val
-        next_symptom_val = symptom_val
-        reward_val = 0.0
-        fuzzy_model.default_count += 1
-    else:
-        # Get outputs
-        next_test_val = fuzzy_model.prediction.output['next_test']
-        next_symptom_val = fuzzy_model.prediction.output['next_symptoms']
-        mvnalized_reward = fuzzy_model.prediction.output['reward']
-
-        # Demvnalize reward
-        reward_val = mvnalized_reward * (fuzzy_model.reward_max - fuzzy_model.reward_min) + fuzzy_model.reward_min
-
-    return np.array([next_test_val, next_symptom_val]), reward_val
-
-
 if __name__ == "__main__":
     # Create the POMDP
     pomdp = create_continuous_medical_pomdp(init_state="healthy")
-    pomdp.agent.observation_model.plot_observation_distribution()
-    #pomdp.agent.observation_model.plot_observation_distribution()
-    # Evaluate the fuzzy model's performance
-    #evaluate_fuzzy_reward_prediction(trials=5, horizon=10)
