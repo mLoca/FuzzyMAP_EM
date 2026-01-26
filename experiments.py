@@ -1,40 +1,34 @@
-"""
-For each setup of the JSON fill, we will run three different experiments:
- - fEM with fixed transition (few data and noisy observations)
- - fEM with fixed observation (few data and noisy observations)
- - fEM with 0 clue (few data and noisy observations)
-"""
 import os
+import pickle
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 
+import numpy as np
 import yaml
 import itertools
 import copy
-import numpy as np
-from matplotlib import pyplot as plt
 from pomdp_py import Agent, Environment
 
 import utils.utils as utils
+from envs.continuous_medical_pomdp import ContinuousObservationModel
 
 from models.trainable.pomdp_EM import PomdpEM
 from models.trainable.pomdp_MAP_EM import PomdpMAPEM
-from models.trainable.fuzzy_EM import FuzzyPOMDP, \
-    visualize_observation_distributions, _visualize_comparison_observation_distributions
-from fuzzy.fuzzy_model import create_continuous_medical_pomdp, build_fuzzymodel, collect_data, _evaluate_model
+from models.trainable.fuzzy_EM import FuzzyPOMDP
+from fuzzy.fuzzy_model import build_fuzzymodel
 
-from continouos_pomdp_example import ContinuousObservationModel
-from pomdp_example import *
+from envs.medical_pomdp import *
 from utils.metrics import compute_error_metrics, visualize_L1_trials, visualize_KL_trials, plot_grid_search_heatmap, \
     plot_1d_sensitivity
 
 obs_index = {"test": 0, "symptoms": 1}
+
+
 class SyntheticEnvironment:
     def __init__(self, config, distribution_type="mvn"):
         self.n_states = config['n_states']
         self.n_actions = config['n_actions']
         self.obs_dim = config['obs_dim']
-
         self.states = config['states']
         self.actions = config['actions']
 
@@ -62,6 +56,49 @@ class SyntheticEnvironment:
         self.original_transitions = config['true_transitions']
 
         self.pomdp = self._generate_POMDP(config)
+
+    def _generate_POMDP(self, config):
+        transition_model = MedicalTransitionModel(config["states"], self.true_transitions)
+        obs_model = ContinuousObservationModel(config["states"], config["actions"], self.true_observations,
+                                               distribution=self.distribution_type)
+        # Reward and Policy models are needed for the Agent structure but not for data generation logic
+        policy_model = MedicalPolicyModel()
+
+        init_belief = pomdp_py.Histogram({
+            State("healthy"): 1 / 3,
+            State("sick"): 1 / 3,
+            State("critical"): 1 / 3
+        })
+
+        # NOTE: reward model is not used in data generation
+        reward_model = MedicalRewardModel()
+
+        agent = Agent(
+            init_belief=init_belief,
+            policy_model=policy_model,
+            transition_model=transition_model,
+            observation_model=obs_model,
+            reward_model=reward_model)
+
+        env = Environment(init_state=State(random.choice(config["states"])),
+                          transition_model=transition_model,
+                          reward_model=reward_model)
+
+        return pomdp_py.POMDP(agent, env)
+
+    def _reset_environment(self):
+        """
+        Create a new POMDP instance from an existing one.
+        This is useful for resetting the environment.
+        """
+        init_belief = pomdp_py.Histogram({
+            State("healthy"): 1 / 3,
+            State("sick"): 1 / 3,
+            State("critical"): 1 / 3
+        })
+
+        self.pomdp.agent.set_belief(init_belief, prior=True)
+        self.pomdp.agent.tree = None
 
     def generate_data(self, data_size, seq_length, noise_sd, seed=None):
         if seed is not None:
@@ -92,49 +129,51 @@ class SyntheticEnvironment:
 
         return observations, actions
 
-    def _generate_POMDP(self, config):
-        transition_model = MedicalTransitionModel(config["states"], self.true_transitions)
-        obs_model = ContinuousObservationModel(config["states"], config["actions"], self.true_observations,
-                                               distribution=self.distribution_type)
-        policy_model = MedicalPolicyModel()
 
-        init_belief = pomdp_py.Histogram({
-            State("healthy"): 1 / 3,
-            State("sick"): 1 / 3,
-            State("critical"): 1 / 3
-        })
+def _expand_models_for_grid_search_(config_models):
+    expanded_models = []
 
-        # NOTE: reward model is not used in data generation
-        reward_model = MedicalRewardModel()
+    for model_config in config_models:
+        if not model_config.get("active", True):
+            continue
 
-        agent = Agent(
-            init_belief=init_belief,
-            policy_model=policy_model,
-            transition_model=transition_model,
-            observation_model=obs_model,
-            reward_model=reward_model)
+        if not model_config.get("grid_search", False):
+            expanded_models.append(model_config)
+            continue
 
-        env = Environment(init_state=State(random.choice(config["states"])),
-                          transition_model=transition_model,
-                          reward_model=reward_model)
-        return pomdp_py.POMDP(agent, env)
+        param = model_config.get("params", {})
+        model_name = model_config["name"]
 
-    def _reset_environment(self):
-        """
-        Create a new POMDP instance from an existing one.
-        This is useful for resetting the environment.
-        """
-        init_belief = pomdp_py.Histogram({
-            State("healthy"): 1 / 3,
-            State("sick"): 1 / 3,
-            State("critical"): 1 / 3
-        })
+        # Separate static and dynamic parameters
+        static_params = {k: v for k, v in param.items() if not isinstance(v, list)}
+        dynamic_params = {k: v for k, v in param.items() if isinstance(v, list)}
 
-        self.pomdp.agent.set_belief(init_belief, prior=True)
-        self.pomdp.agent.tree = None
+        if not dynamic_params:
+            expanded_models.append(model_config)
+            continue
+
+        params_names = list(dynamic_params.keys())
+        params_values = list(dynamic_params.values())
+        params_combinations = list(itertools.product(*params_values))
+
+        for combination in params_combinations:
+            new_config = copy.deepcopy(model_config)
+            new_config["grid_search"] = False
+
+            combination_params = dict(zip(params_names, combination))
+            new_config["params"] = {**static_params, **combination_params}
+
+            # Give it a unique name
+            param_suffix = "_".join([f"{k}={v}" for k, v in combination_params.items()])
+            new_config["name"] = f"{model_name}_{param_suffix}"
+            expanded_models.append(new_config)
+
+    return expanded_models
 
 
-def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, config_models, standard_param, verbose):
+def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models, standard_param,
+                      verbose,
+                      cache_dir="res/cache/"):
     """
     Generates ONE dataset for this run_id/size.
     Evaluates ALL models in 'model_configs_list' on this exact dataset.
@@ -142,79 +181,42 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
 
     results_batch = []
     results_model = []
+
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
+
     seed = seed + trial  # Different seed per trial
+
+    models_to_run, cached_results = get_model_to_run(config_models, env_config, exp_id, data_size, noise_sd, trial,
+                                                     cache_dir, verbose)
+    if len(models_to_run) == 0:
+        return cached_results
 
     # Generate dataset
     dist_type = env_config.get("distribution_type", "mvn")
     env = SyntheticEnvironment(env_config, distribution_type=dist_type)
     obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=seed)
 
-    #env.pomdp.agent.observation_model.plot_observation_distribution()
-
-    fuzzy_model = build_fuzzymodel(env.pomdp,
-                                   seed=seed)
-    #test_df = collect_data(pomdp=env.pomdp, trials=1500, horizon=3, target_per_state=0, state_in_df=True)
-    #_evaluate_model(fuzzy_model, test_df)
+    fuzzy_model = build_fuzzymodel(env.pomdp, seed=seed)
 
     np.random.seed(seed)
     random.seed(seed)
 
-    for model_config in config_models:
+    for model_config, filepath in models_to_run:
         model_name = model_config["name"]
-        model_cls = model_config["class"]
-        model_params = model_config.get("params", {})
         if model_config["active"] is True:
             print(f" Running model: {model_name}")
             try:
-                params = model_params.copy()
+                model = _instantiate_model_from_config(model_config, env, fuzzy_model, seed)
 
-                #TODO: fixed part if is necessary.
-                #if config_item.get('fix_transitions', False):
-                #    params['fix_transitions'] = env.true_transitions
-                #if config_item.get('fix_observations', False):
-                #    pass
-                #if 'fixed_observation_states' in config_item:
-                #    params['fixed_observation_states'] = config_item['fixed_observation_states']
-                if model_cls == "PomdpEM":
-                    model = PomdpEM(n_states=env.n_states,
-                                    n_actions=env.n_actions,
-                                    obs_dim=env.obs_dim,
-                                    verbose=verbose,
-                                    seed=seed,
-                                    **params)
-                elif model_cls == "FuzzyPOMDP":
-
-                    model = FuzzyPOMDP(n_states=env.n_states,
-                                       n_actions=env.n_actions,
-                                       obs_dim=env.obs_dim,
-                                       verbose=verbose,
-                                       seed=seed,
-                                       fuzzy_model=fuzzy_model,
-                                       ensure_psd=True,
-                                       obs_var_index=obs_index,
-                                       **params)
-                elif model_cls == "PomdpMAPEM":
-                    model = PomdpMAPEM(n_states=env.n_states,
-                                       n_actions=env.n_actions,
-                                       obs_dim=env.obs_dim,
-                                       verbose=verbose,
-                                       seed=seed,
-                                       **params)
-                else:
-                    raise ValueError(f"Unknown model class: {model_cls}")
-
-                print(f"\\n Training model {model_name} on dataset (size={data_size}, seq_length={seq_length}, "
+                print(f"\n Training model {model_name} on dataset (size={data_size}, seq_length={seq_length}, "
                       f"noise_sd={noise_sd}, trial={trial})...")
 
                 start_time = time.time()
-                #TODO: add the kmeans initialization if necessary
-                #model.initialize_with_kmeans(observations=obs)
 
                 fit_ll = model.fit(obs, acts,
                                    max_iterations=standard_param["n_iterations"],
                                    tolerance=float(standard_param["tolerance"]))
-                #visualize_observation_distributions(model, env.n_states, title_prefix=f"{model_name}",
-                #                                    datasize=f"{data_size}_noise{noise_sd}")
 
                 metrics = compute_error_metrics(model,
                                                 env.original_transitions,
@@ -230,7 +232,7 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
                     "perm_ord": metrics['perm_ord']
                 })
 
-                results_batch.append({
+                result_entry = {
                     "model_name": model_name,
                     "env_name": env_config['name'],
                     "data_size": data_size,
@@ -240,54 +242,82 @@ def run_dataset_batch(trial, env_config, data_size, seq_length, noise_sd, seed, 
                     "final_log_likelihood": fit_ll,
                     "training_time_sec": elapsed_time,
                     "metrics": metrics
-                })
+                }
+                results_batch.append(result_entry)
 
                 print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
                 print(f"  Final metrics: {metrics}")
 
+                with open(filepath, 'wb') as f:
+                    pickle.dump(result_entry, f)
+                cached_results.append(results_batch)
+
             except Exception as e:
                 print(f" Model {model_name} failed: {e}")
 
-    #_visualize_comparison_observation_distributions(results_model, env.n_states,"",
-    #                                                   f"{data_size} Noise: {noise_sd}")
     return results_batch
 
 
-def _expand_models_for_grid_search_(config_models):
-    expanded_models = []
+def _instantiate_model_from_config(model_config, env, fuzzy_model, seed):
+    """
+    Instantiate a model based on the provided configuration.
+    """
+    model_cls = model_config["class"]
+    model_params = model_config.get("params", {})
 
+    common_args = {
+        "n_states": env.n_states,
+        "n_actions": env.n_actions,
+        "obs_dim": env.obs_dim,
+        "verbose": False,
+        "seed": seed
+    }
+
+    if model_cls == "PomdpEM":
+        model = PomdpEM(**common_args, **model_params)
+    elif model_cls == "FuzzyPOMDP":
+        model = FuzzyPOMDP(**common_args,
+                           fuzzy_model=fuzzy_model,
+                           obs_var_index=obs_index,
+                           ensure_psd=True,
+                           **model_params)
+    elif model_cls == "PomdpMAPEM":
+        model = PomdpMAPEM(**common_args,**model_params)
+    else:
+        raise ValueError(f"Unknown model class: {model_cls}")
+
+    return model
+
+
+def get_model_to_run(config_models, env_config, exp_id, data_size, noise_sd, trial, cache_dir, verbose):
+    cached_results = []
+    models_to_run = []
     for model_config in config_models:
-        if not model_config.get("active", True) or not model_config.get("grid_search", False):
-            expanded_models.append(model_config)
-            continue
+        if model_config.get("active", True):
+            model_name = model_config["name"]
+            model_name = model_name.replace("/", "_").replace(" ", "_").replace("=", "")
 
-        param = model_config.get("params", {})
-        model_name = model_config["name"]
+            # Safe filename generation
+            filename = f"sz{data_size}_ns{noise_sd}_tr{trial}.pkl"
+            file_path = f"{exp_id}/{env_config['name']}/{model_name}/"
+            dir_path = os.path.join(cache_dir, file_path)
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path)
 
-        static_params = {k: v for k, v in param.items() if not isinstance(v, list)}
-        dynamic_params = {k: v for k, v in param.items() if isinstance(v, list)}
+            filepath = f"{dir_path}/{filename}"
 
-        if not dynamic_params:
-            expanded_models.append(model_config)
-            continue
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'rb') as f:
+                        cached_data = pickle.load(f)
+                        cached_results.append(cached_data)
+                    if verbose: print(f" [Cache] Loaded {filename}")
+                except Exception:
+                    models_to_run.append((model_config, filepath))
+            else:
+                models_to_run.append((model_config, filepath))
 
-        params_names = list(dynamic_params.keys())
-        params_values = list(dynamic_params.values())
-        params_combinations = list(itertools.product(*params_values))
-
-        for i, combination in enumerate(params_combinations):
-            new_config = copy.deepcopy(model_config)
-            new_config["grid_search"] = False
-
-            combination_params = dict(zip(params_names, combination))
-            full_params = {**static_params, **combination_params}
-            new_config["params"] = full_params
-
-            param_suffix = "_".join([f"{k}={v}" for k, v in combination_params.items()])
-            new_config["name"] = f"{model_name}_{param_suffix}"
-            expanded_models.append(new_config)
-
-    return expanded_models
+    return models_to_run, cached_results
 
 
 def main():
@@ -321,7 +351,6 @@ def main():
             "noise_level"]
         env_names, dataset_sizes = exp_config["environments"], exp_config["dataset_sizes"]
 
-
         tasks = []
         for env_name in env_names:
             if env_name not in all_env_names:
@@ -332,7 +361,6 @@ def main():
             env_config = [e for e in environments if e['name'] == env_name][0]
             results_summary[exp_id][env_name] = {}
 
-            config_models = exp_config["models"]
             standard_param = exp_config.get("standard_params", {})
             # One task per (Dataset Size,  noise_level,  n_trial)
             # Each task will run ALL batch_configs on that specific dataset
@@ -340,7 +368,7 @@ def main():
             for data_size in dataset_sizes:
                 for noise_sd in noise_levels:
                     for trial in range(n_trials):
-                        tasks.append((trial, env_config, data_size, seq_length, noise_sd, seed, config_models,
+                        tasks.append((exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models,
                                       standard_param, verbose))
 
         if not (global_settings.get("parallel_execution", False)):
@@ -355,7 +383,7 @@ def main():
                         results_summary[exp_id][env_name][m_name] = []
                     results_summary[exp_id][env_name][m_name].append(res)
         else:
-            with ProcessPoolExecutor(max_workers=min(15, 32)) as executor:
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 32)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
@@ -390,7 +418,7 @@ def main():
                     model_results,
                     metric_key='final_kl',
                     title=f"Grid Search KL Divergence",
-                    vmax=13.5,
+                    vmax=7,
                     exp_name=exp_id,
                     folder_name="res/hyperparameter_grid_search/"
                 )
@@ -436,6 +464,7 @@ def main():
                                   f"Final LL: {res['final_log_likelihood']:.2f}, "
                                   f"Training Time (s): {res['training_time_sec']:.2f}, "
                                   f"Metrics: {res['metrics']}")
+
 
 if __name__ == "__main__":
     main()
