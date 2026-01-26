@@ -178,13 +178,6 @@ def compute_error_metrics(learned_model, true_transitions, true_observations, st
     l1_diff = np.sum(np.abs(aligned_transitions - true_transitions))
     avg_l1_error = l1_diff / (n_states * n_actions)
 
-    #print the true mean and cov
-    #TODO: remove this print statement later
-    #print("True Means and Covariances:")
-    #for state in range(n_states):
-    #    true_obs_mvn = _from_dist_to_mvn(true_observations, dist_type, state_name=states[state])
-    #    print(f"State {state}: Mean = {true_obs_mvn.mean}, Covariance = {true_obs_mvn.cov}")
-
     return {
         "final_kl": final_kl,
         "avg_l1_error": avg_l1_error,
@@ -243,7 +236,7 @@ def visualize_L1_trials(results, noise_level=0.01, env_name='', folder_name=''):
                loc='upper right',
                framealpha=0.8
                )
-    path = folder_name + env_name + '_SD' + str(noise_level) + '_L1_error_plot.png'
+    path = folder_name + "avg_l1_error_" + env_name + '_SD' + str(noise_level) + '.png'
     plt.savefig(path, bbox_inches='tight', pad_inches=0.05)
     plt.tight_layout()
     plt.show()
@@ -301,8 +294,8 @@ def visualize_KL_trials(results, noise_level='', env_name='',  folder_name=''):
                frameon=True,
                loc='upper right',
                framealpha=0.8)
-    plt.savefig(folder_name+env_name + '_SD' + str(noise_level) + '_KL_error_plot.png',
-                bbox_inches='tight', pad_inches=0.05)
+    path =  path = folder_name + "KL_divergence_" + env_name + '_SD' + str(noise_level) + '.png'
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.05)
     plt.tight_layout()
     plt.show()
 

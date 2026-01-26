@@ -1,8 +1,9 @@
 global_settings:
   random_seed: 5
   output_dir: "./results/"
+  use_cache: True
   verbose: False
-  parallel_execution: True
+  parallel_execution: False
 
 environments:
   - name: "env_standard_healthcare_mvn"
@@ -173,9 +174,9 @@ experiments:
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
     environments: ["env_standard_healthcare_mvn"]
     sequence_length: 3
-
+    folder_name: "res/data_efficiency_study_standard/"
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
-    noise_level: [0.01]
+    noise_level: [0.01, 0.05, 0.1]
     n_trials: 40
 
     standard_params:
@@ -194,7 +195,7 @@ experiments:
 
       - name: "Standard MAP"
         class: "PomdpMAPEM"
-        active: False
+        active: True
         params:
           parallel: False
           prior_alpha: 1.5
@@ -204,14 +205,14 @@ experiments:
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
-        active: False
+        active: True
         color: "red"
         marker: "s"
         params: &default_fuzzy_params
           use_fuzzy: True
           parallel: False
           lambda_T: 0.25
-          lambda_O: 0.05
+          lambda_O: 0.10
           hyperparameter_update_method: "static"
           integration_method: "mean"
           mc_samples: 150
@@ -227,31 +228,31 @@ experiments:
           integration_method: "mean"
           alpha_ah: 0.1
           lambda_T: 0.25
-          lambda_O: 0.05
+          lambda_O: 0.10
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
-        active: False
+        active: True
         color: "cyan"
         marker: "^"
         params:
           <<: *default_fuzzy_params
           hyperparameter_update_method: "empirical_bayes"
           integration_method: "mean"
-          eb_learning_rate_T: 0.0005
-          eb_learning_rate_O: 0.0000005
+          eb_learning_rate_T: 0.00001
+          eb_learning_rate_O: 0.000001
           lambda_T: 0.25
-          lambda_O: 0.05
+          lambda_O: 0.10
+
   data_efficiency_study2:
-    active: False
+    active: True
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
     environments: ["env_medium_healthcare_mvn"]
     sequence_length: 3
-
-
+    folder_name: "res/data_efficiency_study_medium/"
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
-    noise_level: [0.01]
-    n_trials: 5
+    noise_level: [0.01, 0.05, 0.1]
+    n_trials: 40
 
     standard_params:
         n_iterations: 500
@@ -279,14 +280,14 @@ experiments:
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
-        active: False
+        active: True
         color: "red"
         marker: "s"
         params: &default_fuzzy_params2
           use_fuzzy: True
           parallel: False
-          lambda_T: 0.25
-          lambda_O: 0.05
+          lambda_T: 0.75
+          lambda_O: 0.25
           hyperparameter_update_method: "static"
           integration_method: "mean"
           mc_samples: 150
@@ -300,31 +301,32 @@ experiments:
           <<: *default_fuzzy_params2
           hyperparameter_update_method: "adaptive"
           integration_method: "mean"
-          alpha_ah: 0.1
-          lambda_T: 0.25
-          lambda_O: 0.05
+          alpha_ah: 0.10
+          lambda_T: 0.75
+          lambda_O: 0.25
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
-        active: False
+        active: True
         color: "cyan"
         marker: "^"
         params:
           <<: *default_fuzzy_params2
           hyperparameter_update_method: "empirical_bayes"
           integration_method: "mean"
-          eb_learning_rate_T: 0.0005
+          eb_learning_rate_T: 0.000005
           eb_learning_rate_O: 0.0000005
-          lambda_T: 0.25
-          lambda_O: 0.05
+          lambda_T: 0.75
+          lambda_O: 0.25
+
   data_efficiency_study3:
-    active: False
+    active: True
     description: "Study on the impact of data size on model performance in healthcare POMDPs."
     environments: ["env_hard_healthcare_mvn"]
     sequence_length: 3
-
+    folder_name: "res/data_efficiency_study_hard/"
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
-    noise_level: [0.01]
+    noise_level: [0.01, 0.05, 0.1]
     n_trials: 40
 
     standard_params:
@@ -359,8 +361,8 @@ experiments:
         params: &default_fuzzy_params3
           use_fuzzy: True
           parallel: False
-          lambda_T: 0.25
-          lambda_O: 0.05
+          lambda_T: 0.50
+          lambda_O: 0.15
           hyperparameter_update_method: "static"
           integration_method: "mean"
           mc_samples: 150
@@ -374,9 +376,9 @@ experiments:
           <<: *default_fuzzy_params3
           hyperparameter_update_method: "adaptive"
           integration_method: "mean"
-          alpha_ah: 0.1
-          lambda_T: 0.255
-          lambda_O: 0.051
+          alpha_ah: 0.025
+          lambda_T: 0.50
+          lambda_O: 0.15
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
@@ -387,19 +389,19 @@ experiments:
           <<: *default_fuzzy_params3
           hyperparameter_update_method: "empirical_bayes"
           integration_method: "mean"
-          eb_learning_rate_T: 0.0005
+          eb_learning_rate_T: 0.000005
           eb_learning_rate_O: 0.0000005
-          lambda_T: 0.25
-          lambda_O: 0.05
-
+          lambda_T: 0.50
+          lambda_O: 0.15
 
   integration_method_comparison:
     active: False
     description: "Comparison between Mean and Monte Carlo integration methods in FuzzyPOMDP."
-    environments: [ "env_standard_healthcare_mvn", "env_medium_healthcare_mvn", "env_hard_healthcare_mvn"]
+    environments: [ "env_standard_healthcare_mvn"]
     sequence_length: 3
     dataset_sizes: [5, 10, 15, 20, 25, 30, 35]
-    noise_level: [ 0.01]
+    noise_level: [ 0.01, 0.1]
+    folder_name: "integration_method_comparison"
     n_trials: 20
     standard_params:
       n_iterations: 500
@@ -449,11 +451,11 @@ experiments:
   hyperparameter_grid_search:
     active: False
     description: "Grid Search for lambda."
-    environments: [ "env_hard_healthcare_mvn" ]
+    environments: ["env_standard_healthcare_mvn", "env_medium_healthcare_mvn", "env_hard_healthcare_mvn"]
     sequence_length: 3
     dataset_sizes: [ 25 ]
     noise_level: [ 0.01 ]
-    n_trials: 5
+    n_trials: 10
     standard_params:
       n_iterations: 400
       tolerance: 1e-4
@@ -473,7 +475,7 @@ experiments:
   adaptive_alpha_search:
       active: False
       description: "Grid search for alpha_ah parameter using the Adaptive update method."
-      environments: ["env_standard_healthcare_mvn"]
+      environments: ["env_hard_healthcare_mvn"]
       sequence_length: 3
       dataset_sizes: [25]
       noise_level: [0.01]
@@ -494,8 +496,8 @@ experiments:
             integration_method: "mean"
 
 
-            lambda_T: 0.30
-            lambda_O: 0.10
+            lambda_T: 0.50
+            lambda_O: 0.15
 
             alpha_ah: [0.01, 0.05, 0.1, 0.15, 0.20, 0.35, 0.5, 0.75, 1.0]
 

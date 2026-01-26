@@ -171,93 +171,6 @@ def _expand_models_for_grid_search_(config_models):
     return expanded_models
 
 
-def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models, standard_param,
-                      verbose,
-                      cache_dir="res/cache/"):
-    """
-    Generates ONE dataset for this run_id/size.
-    Evaluates ALL models in 'model_configs_list' on this exact dataset.
-    """
-
-    results_batch = []
-    results_model = []
-
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir, exist_ok=True)
-
-    seed = seed + trial  # Different seed per trial
-
-    models_to_run, cached_results = get_model_to_run(config_models, env_config, exp_id, data_size, noise_sd, trial,
-                                                     cache_dir, verbose)
-    if len(models_to_run) == 0:
-        return cached_results
-
-    # Generate dataset
-    dist_type = env_config.get("distribution_type", "mvn")
-    env = SyntheticEnvironment(env_config, distribution_type=dist_type)
-    obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=seed)
-
-    fuzzy_model = build_fuzzymodel(env.pomdp, seed=seed)
-
-    np.random.seed(seed)
-    random.seed(seed)
-
-    for model_config, filepath in models_to_run:
-        model_name = model_config["name"]
-        if model_config["active"] is True:
-            print(f" Running model: {model_name}")
-            try:
-                model = _instantiate_model_from_config(model_config, env, fuzzy_model, seed)
-
-                print(f"\n Training model {model_name} on dataset (size={data_size}, seq_length={seq_length}, "
-                      f"noise_sd={noise_sd}, trial={trial})...")
-
-                start_time = time.time()
-
-                fit_ll = model.fit(obs, acts,
-                                   max_iterations=standard_param["n_iterations"],
-                                   tolerance=float(standard_param["tolerance"]))
-
-                metrics = compute_error_metrics(model,
-                                                env.original_transitions,
-                                                env.original_observations,
-                                                env.states,
-                                                dist_type=dist_type)
-
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                results_model.append({
-                    "name": model_name,
-                    "model": model,
-                    "perm_ord": metrics['perm_ord']
-                })
-
-                result_entry = {
-                    "model_name": model_name,
-                    "env_name": env_config['name'],
-                    "data_size": data_size,
-                    "sequence_length": seq_length,
-                    "noise_sd": noise_sd,
-                    "trial": trial,
-                    "final_log_likelihood": fit_ll,
-                    "training_time_sec": elapsed_time,
-                    "metrics": metrics
-                }
-                results_batch.append(result_entry)
-
-                print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
-                print(f"  Final metrics: {metrics}")
-
-                with open(filepath, 'wb') as f:
-                    pickle.dump(result_entry, f)
-                cached_results.append(results_batch)
-
-            except Exception as e:
-                print(f" Model {model_name} failed: {e}")
-
-    return results_batch
-
-
 def _instantiate_model_from_config(model_config, env, fuzzy_model, seed):
     """
     Instantiate a model based on the provided configuration.
@@ -282,14 +195,18 @@ def _instantiate_model_from_config(model_config, env, fuzzy_model, seed):
                            ensure_psd=True,
                            **model_params)
     elif model_cls == "PomdpMAPEM":
-        model = PomdpMAPEM(**common_args,**model_params)
+        model = PomdpMAPEM(**common_args, **model_params)
     else:
         raise ValueError(f"Unknown model class: {model_cls}")
 
     return model
 
 
-def get_model_to_run(config_models, env_config, exp_id, data_size, noise_sd, trial, cache_dir, verbose):
+def _check_cache(config_models, env_config, exp_id, data_size, noise_sd, trial, cache_dir,
+                 use_cache, verbose):
+    """
+    Checks for existing cached results and returns models that need to be run.
+    """
     cached_results = []
     models_to_run = []
     for model_config in config_models:
@@ -306,7 +223,7 @@ def get_model_to_run(config_models, env_config, exp_id, data_size, noise_sd, tri
 
             filepath = f"{dir_path}/{filename}"
 
-            if os.path.exists(filepath):
+            if use_cache and os.path.exists(filepath):
                 try:
                     with open(filepath, 'rb') as f:
                         cached_data = pickle.load(f)
@@ -318,6 +235,98 @@ def get_model_to_run(config_models, env_config, exp_id, data_size, noise_sd, tri
                 models_to_run.append((model_config, filepath))
 
     return models_to_run, cached_results
+
+
+def _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model, seed, standard_param):
+    """Trains a single model and computes metrics."""
+    model_name = model_config["name"]
+    print(f" ... Training {model_name} ...")
+
+    try:
+        model = _instantiate_model_from_config(model_config, env, fuzzy_model, seed)
+        start_time = time.time()
+
+        fit_ll = model.fit(
+            obs, acts,
+            max_iterations=standard_param.get("n_iterations", 100),
+            tolerance=float(standard_param.get("tolerance", 1e-4))
+        )
+
+        metrics = compute_error_metrics(
+            model,
+            env.original_transitions,
+            env.original_observations,
+            env.states,
+            dist_type=env.distribution_type
+        )
+
+        elapsed_time = time.time() - start_time
+        print(f" ... {model_name} finished in {elapsed_time:.2f}s. Final LL: {fit_ll:.2f}")
+
+        return fit_ll, elapsed_time, metrics
+
+    except Exception as e:
+        print(f" [Error] Model {model_name} failed: {e}")
+        return None
+
+
+def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models, standard_param,
+                      use_cache=True, verbose=False, cache_dir="res/cache/"):
+    """
+    Generates ONE dataset for this run_id/size.
+    Evaluates ALL models in 'model_configs_list' on this exact dataset.
+    """
+
+    if not os.path.exists(cache_dir) and use_cache:
+        os.makedirs(cache_dir, exist_ok=True)
+
+    current_seed = seed + trial
+
+    models_to_run, cached_results = _check_cache(config_models, env_config, exp_id, data_size, noise_sd, trial,
+                                                 cache_dir, use_cache, verbose)
+    if len(models_to_run) == 0:
+        return cached_results
+
+    # Generate dataset
+    dist_type = env_config.get("distribution_type", "mvn")
+    env = SyntheticEnvironment(env_config, distribution_type=dist_type)
+    obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=current_seed)
+
+    fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed)
+
+    np.random.seed(current_seed)
+    random.seed(current_seed)
+    # Train and evaluate each missing model
+    results_batch = []
+    for model_config, filepath in models_to_run:
+        model_name = model_config["name"]
+
+        if model_config["active"] is True:
+            fit_ll, elapsed_time, metrics = _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model,
+                                                                      current_seed,
+                                                                      standard_param)
+
+            result_entry = {
+                "model_name": model_name,
+                "env_name": env_config['name'],
+                "data_size": data_size,
+                "sequence_length": seq_length,
+                "noise_sd": noise_sd,
+                "trial": trial,
+                "final_log_likelihood": fit_ll,
+                "training_time_sec": elapsed_time,
+                "metrics": metrics
+            }
+            results_batch.append(result_entry)
+
+            print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
+            print(f"  Final metrics: {metrics}")
+            if use_cache:
+                with open(filepath, 'wb') as f:
+                    pickle.dump(result_entry, f)
+                cached_results.append(results_batch)
+
+    return results_batch
 
 
 def main():
@@ -332,8 +341,8 @@ def main():
     global_settings = config["global_settings"]
     seed = global_settings.get("seed", 42)
     verbose = global_settings.get("verbose", True)
-    environments = config["environments"]
-    all_env_names = [env['name'] for env in environments]
+    use_cache = global_settings.get("use_cache", True)
+    all_environments = {env['name']: env for env in config["environments"]}
     results_summary = {}
 
     for exp_id, exp_config in config['experiments'].items():
@@ -345,100 +354,82 @@ def main():
 
         folder_name = exp_config.get("folder_name", "res/")
         config_models = _expand_models_for_grid_search_(exp_config["models"])
-        results_summary[exp_id] = {}
-        results_summary[exp_id]['folder_name'] = folder_name
-        seq_length, n_trials, noise_levels = exp_config["sequence_length"], exp_config["n_trials"], exp_config[
-            "noise_level"]
-        env_names, dataset_sizes = exp_config["environments"], exp_config["dataset_sizes"]
+
+        results_summary[exp_id] = {'folder_name': folder_name}
+        seq_length = exp_config["sequence_length"]
+        n_trials = exp_config["n_trials"]
+        noise_levels = exp_config["noise_level"]
+        dataset_sizes = exp_config["dataset_sizes"]
+        standard_params = exp_config.get("standard_params", {})
 
         tasks = []
-        for env_name in env_names:
-            if env_name not in all_env_names:
+        for env_name in exp_config["environments"]:
+            if env_name not in all_environments:
                 print(f"Environment {env_name} not found in configuration.")
                 continue
 
             print(f"Using environment: {env_name}")
-            env_config = [e for e in environments if e['name'] == env_name][0]
+            env_config = all_environments[env_name]
             results_summary[exp_id][env_name] = {}
 
-            standard_param = exp_config.get("standard_params", {})
             # One task per (Dataset Size,  noise_level,  n_trial)
             # Each task will run ALL batch_configs on that specific dataset
-
             for data_size in dataset_sizes:
                 for noise_sd in noise_levels:
                     for trial in range(n_trials):
                         tasks.append((exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models,
-                                      standard_param, verbose))
+                                      standard_params, use_cache, verbose))
 
+        all_batch_results = []
         if not (global_settings.get("parallel_execution", False)):
-            # Run tasks SEQUENTIALLY
             for t in tasks:
-                batch_res = run_dataset_batch(*t)
-                # Unpack batch results into the structured summary
-                for res in batch_res:
-                    m_name = res.get('model_name', 'unknown')
-                    env_name = res.get('env_name', 'unknown')
-                    if m_name not in results_summary[exp_id][env_name]:
-                        results_summary[exp_id][env_name][m_name] = []
-                    results_summary[exp_id][env_name][m_name].append(res)
+                all_batch_results.append(run_dataset_batch(*t))
         else:
             with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 32)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:
-                        batch_res = future.result()
-                        # Unpack batch results into the structured summary
-                        for res in batch_res:
-                            m_name = res.get('model_name', 'unknown')
-                            env_name = res.get('env_name', 'unknown')
-                            if m_name not in results_summary[exp_id][env_name]:
-                                results_summary[exp_id][env_name][m_name] = []
-                            results_summary[exp_id][env_name][m_name].append(res)
+                        all_batch_results.append(future.result())
                     except Exception as e:
-                        print(f"    Batch failed: {e}")
+                        print(f"    [Batch Failed]: {e}")
+
+        # Organize results
+        for batch in all_batch_results:
+            for res in batch:
+                m_name = res.get('model_name', 'unknown')
+                env_name = res.get('env_name', 'unknown')
+                if m_name not in results_summary[exp_id][env_name]:
+                    results_summary[exp_id][env_name][m_name] = []
+                results_summary[exp_id][env_name][m_name].append(res)
 
     print("All experiments completed. Summary of results:")
+    #TODO: Make it more elegant and general
     for exp_id, env_results in results_summary.items():
         print(f"Experiment {exp_id}:")
         folder_name = env_results.pop('folder_name', 'res/')
         for env_name, model_results in env_results.items():
             if "grid_search" in exp_id:
-
                 plot_grid_search_heatmap(
-                    model_results,
-                    metric_key='avg_l1_error',
-                    title=f"Grid Search L1 Error",
-                    vmax=1.1,
-                    exp_name=exp_id,
-                    folder_name="res/hyperparameter_grid_search/"
+                    model_results, metric_key='avg_l1_error',
+                    title=f"Grid Search L1 Error", vmax=1.1,
+                    exp_name=exp_id, folder_name="res/hyperparameter_grid_search/"
                 )
 
                 plot_grid_search_heatmap(
-                    model_results,
-                    metric_key='final_kl',
-                    title=f"Grid Search KL Divergence",
-                    vmax=7,
-                    exp_name=exp_id,
-                    folder_name="res/hyperparameter_grid_search/"
+                    model_results, metric_key='final_kl',
+                    title=f"Grid Search KL Divergence", vmax=7,
+                    exp_name=exp_id, folder_name="res/hyperparameter_grid_search/"
                 )
 
             elif "adaptive" in exp_id:
-
                 plot_1d_sensitivity(
-                    model_results,
-                    param_name='alpha_ah',
-                    metric_key='avg_l1_error',
-                    title=f"Adaptive Sensitivity: L1 Error",
-                    vmax=1.2, vmin=0.0,
+                    model_results,  param_name='alpha_ah', metric_key='avg_l1_error',
+                    title=f"Adaptive Sensitivity: L1 Error", vmax=1.2, vmin=0.0,
                     folder_name="res/adaptive_alpha_search/"
                 )
                 plot_1d_sensitivity(
-                    model_results,
-                    param_name='alpha_ah',
-                    metric_key='final_kl',
-                    title=f"Adaptive Sensitivity: KL Divergence vs Alpha",
-                    vmax=12, vmin=0,
+                    model_results, param_name='alpha_ah', metric_key='final_kl',
+                    title=f"Adaptive Sensitivity: KL Divergence vs Alpha", vmax=12, vmin=0,
                     folder_name="res/adaptive_alpha_search/"
                 )
             else:
