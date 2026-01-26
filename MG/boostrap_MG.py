@@ -30,17 +30,12 @@ def run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=2, n_actions=2):
 
     print(f"Running {n_bootstrap_samples} bootstrap samples in parallel using {14} jobs...")
     trained_models = []
+
     # Use joblib to run the training in parallel
     trained_models = Parallel(n_jobs=14)(
         delayed(_train_single_bootstrap_model)(
             i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
         ) for i in range(n_bootstrap_samples))
-
-    #for i in range(n_bootstrap_samples):
-    #    model = _train_single_bootstrap_model(
-    #        i, observations, actions, n_sequences, n_states, n_actions, obs_dim, fuzzy_model
-    #    )
-    #   trained_models.append(model)
 
     print("\nAll bootstrap training finished.")
     _analyze_bootstrap_transitions(trained_models)
@@ -55,6 +50,7 @@ def _train_single_bootstrap_model(sample_index, observations, actions, n_sequenc
     """
     print(f"--- Starting Bootstrap Sample {sample_index + 1} ---")
     np.random.seed(base_seed + sample_index)
+
     # Create a bootstrap sample with replacement
     bootstrap_indices = np.random.choice(n_sequences, size=n_sequences)
     bootstrap_obs = [observations[j] for j in bootstrap_indices]
@@ -92,11 +88,6 @@ def _analyze_bootstrap_transitions(trained_models):
     Args:
         trained_models (list): A list of trained FuzzyPOMDP models from the bootstrap.
     """
-    # Store the probabilities for staying in state 0 for each action
-    trans_1_to_0_a0 = []  # Action 0 (Wait)
-    trans_1_to_0_a1 = []  # Action 1 (Ravu)
-    trans_2_to_0_a0 = []  # Action 0 (Wait)
-    trans_2_to_0_a1 = []  # Action 1 (Ravu)
     transitions = {}
     for model in trained_models:
         symptoms_means = model.obs_means[:, SYMPTOMS_IDX]
@@ -123,23 +114,6 @@ def _analyze_bootstrap_transitions(trained_models):
                         transitions[key] = {0: [], 1: []}
                     transitions[key][a].append(prob)
 
-        # Sick to Healthy
-        p_10_a0 = model.transitions[idx_sick, 0, idx_healthy]
-        trans_1_to_0_a0.append(p_10_a0)
-        p_10_a1 = model.transitions[idx_sick, 1, idx_healthy]
-        trans_1_to_0_a1.append(p_10_a1)
-
-        # Critical to Healthy
-        p_20_a0 = model.transitions[idx_critical, 0, idx_healthy]
-        trans_2_to_0_a0.append(p_20_a0)
-        p_20_a1 = model.transitions[idx_critical, 1, idx_healthy]
-        trans_2_to_0_a1.append(p_20_a1)
-
-    _print_stats("Sick -> Healthy", trans_1_to_0_a0, trans_1_to_0_a1)
-
-    # Analyze 2 -> 0
-    _print_stats("Critical -> Healthy", trans_2_to_0_a0, trans_2_to_0_a1)
-
     for key, values in transitions.items():
         _print_stats(key, values[0], values[1])
 
@@ -162,13 +136,6 @@ def _print_stats(name, data_a0, data_a1):
 
 
 def main():
-    """
-    Main function to demonstrate POMDP reconstruction using EM algorithm.
-    1. Generate data from the original POMDP model
-    2. Use EM algorithm to learn/reconstruct the model
-    3. Evaluate the reconstruction quality
-    """
-    # best_model = run_pomdp_reconstruction()
 
     bootstrap_models = run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=3, n_actions=2)
     return bootstrap_models
@@ -176,5 +143,4 @@ def main():
 
 if __name__ == "__main__":
     learned_pomdp = main()
-    # evaluate_fuzzy_reward_prediction(trials=200, horizon=10)
-    # sensitivity_results = rho_sensitivity_analysis()
+
