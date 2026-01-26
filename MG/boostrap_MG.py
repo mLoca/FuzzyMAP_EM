@@ -18,6 +18,7 @@ state_names = {
     2: "Critical"
 }
 
+
 def run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=2, n_actions=2):
     seed = 5
     random.seed(seed)
@@ -136,11 +137,9 @@ def _print_stats(name, data_a0, data_a1):
 
 
 def main():
-
     bootstrap_models = run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=3, n_actions=2)
     return bootstrap_models
 
 
 if __name__ == "__main__":
     learned_pomdp = main()
-
