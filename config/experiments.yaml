@@ -28,29 +28,6 @@ environments:
         critical:
           mean: [ 0.80, 0.82 ]
           cov: [ [ 0.011, 0.0 ], [ 0, 0.011 ] ]
-  - name: "env_standard_healthcare_mvn_AA"
-    n_states: 3
-    n_actions: 2
-    obs_dim: 2
-    states: [ "healthy", "sick",  "critical" ]
-    observations: [ "test", "symptoms" ]
-    actions: [ "wait", "treat" ]
-    distribution_type: "mvn"
-    true_transitions:
-      - [[0.90, 0.10, 0.00], [0.80, 0.15, 0.05]]
-      - [[0.30, 0.65, 0.05], [0.60, 0.35, 0.05]]
-      - [[0.00, 0.10, 0.90], [0.15, 0.60, 0.25]]
-    true_observations:
-      - healthy:
-          mean: [ 0.18, 0.18]
-          cov: [[ 0.01, 0.0001], [ 0.0001, 0.01 ]]
-        sick:
-          mean: [ 0.5, 0.80]
-          cov: [[ 0.025, 0.0001 ], [ 0.0001, 0.025]]
-        critical:
-          mean: [ 0.8, 0.8]
-          cov: [[ 0.01, 0.0001 ], [ 0.0001, 0.01]]
-
   - name: "env_medium_healthcare_mvn"
     n_states: 3
     n_actions: 2
@@ -87,7 +64,6 @@ environments:
       - [[ 0.25, 0.65, 0.10 ], [ 0.60, 0.35, 0.05 ]]
       - [[ 0.10, 0.15, 0.75 ], [ 0.20, 0.60, 0.20 ]]
     true_observations:
-      # Closer means, testing the limits of separability without clipping issues
       - healthy:
           mean: [ 0.30, 0.30 ]
           cov: [[0.007, 0.0], [0.0, 0.007]]
@@ -97,76 +73,6 @@ environments:
         critical:
           mean: [ 0.625, 0.75 ]
           cov: [[0.011, 0.001], [0.001, 0.011]]
-
-  - name: "env_standard_healthcare"
-    n_states: 3
-    n_actions: 2
-    obs_dim: 2
-    states: ["healthy", "sick",  "critical"]
-    observations: ["test", "symptoms"]
-    actions: ["wait", "treat"]
-    distribution_type: "beta"
-    true_transitions:
-          # Deterministic transitions for maximum learnability
-          - [[0.95, 0.05, 0.00], [0.85, 0.10, 0.05]]
-          - [[0.20, 0.70, 0.10], [0.75, 0.20, 0.05]]
-          - [[0.00, 0.10, 0.90], [0.10, 0.75, 0.15]]
-    true_observations:
-      - healthy:
-          mean: [ 0.15, 0.15]
-          cov: [[0.005, 0.0 ], [ 0.0, 0.005 ]]
-        sick:
-          mean: [ 0.50, 0.50]
-          cov: [[ 0.005, 0.0 ], [ 0.0, 0.005 ]]
-        critical:
-          mean: [ 0.85, 0.85]
-          cov: [[ 0.005, 0.0 ], [ 0.0, 0.005 ]]
-
-  - name: "env_medium_healthcare"
-    n_states: 3
-    n_actions: 2
-    obs_dim: 2
-    states: ["healthy", "sick",  "critical"]
-    observations: ["test", "symptoms"]
-    actions: ["wait", "treat"]
-    distribution_type: "beta"
-    true_transitions:
-      - [[0.80, 0.15, 0.05], [0.75, 0.15, 0.10]]
-      - [[0.30, 0.60, 0.10], [0.60, 0.30, 0.10]]
-      - [[0.05, 0.05, 0.90], [0.10, 0.65, 0.25]]
-    true_observations:
-        - healthy:
-             test: [2.0, 10]
-             symptoms: [2, 10]
-          sick:
-             test: [7, 7]
-             symptoms: [7, 7]
-          critical:
-             test: [10, 2]
-             symptoms: [10, 2.5]
-
-  - name: "env_hard_healthcare"
-    n_states: 3
-    n_actions: 2
-    obs_dim: 2
-    states: ["healthy", "sick",  "critical"]
-    observations: ["test", "symptoms"]
-    actions: ["wait", "treat"]
-    distribution_type: "beta"
-    true_transitions:
-      - [[0.75, 0.20, 0.05], [0.70, 0.25, 0.05]]
-      - [[0.20, 0.70, 0.10], [0.55, 0.40, 0.05]]
-      - [[0.10, 0.15, 0.75], [0.20, 0.55, 0.25]]
-    true_observations:
-        - healthy:
-             test: [2, 6]
-             symptoms: [2, 6]
-          sick:
-             test: [2.8, 4.0]
-             symptoms: [7, 3]
-          critical:
-             test: [6, 2.0]
-             symptoms: [6, 2]
 
 experiments:
   data_efficiency_study:
