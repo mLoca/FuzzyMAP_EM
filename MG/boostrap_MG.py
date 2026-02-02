@@ -25,7 +25,7 @@ def run_pomdp_with_bootstrap(n_bootstrap_samples=500, n_states=2, n_actions=2):
     np.random.seed(seed)
 
     fuzzy_model = build_fuzzy_model()
-    observations, actions = _simulate_data(fuzzy_model, 100, 8)
+    observations, actions = _simulate_data(fuzzy_model, 200, 8)
     obs_dim = len(observations[0][0])
     n_sequences = len(observations)
 
