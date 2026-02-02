@@ -1,3 +1,6 @@
+# Author: Roberto Cerioli
+# Description: Expert-defined fuzzy model for Myasthenia Gravis (MG) case study.
+
 from random import random
 
 from simpful import *
@@ -211,20 +214,7 @@ def _simulate_data(FS_model, trials=1, length=7):
         new_values = {}
         for T in np.linspace(0, 1, steps):
             FS.set_variable('Ravu', treatment)
-            #choose the treatment action for the current step randomly
-            #if step >= 0 and step in STEP_TO_SAVE:
-            #   treatment = 0 if random() < 0.5 else 1
-            #   FS.set_variable('Ravu', treatment)
-            #   index_step = STEP_TO_SAVE.index(step)
-            #   action[index_step] = treatment
-            #f step > 0 and step in STEP_TO_SAVE:
-            #   treatment = np.abs(trail % 2 - 1)
-            #   if step > STEP_TO_SAVE[-1] / 2:
-            #       FS.set_variable('Ravu', treatment)
-            #   else:
-            #       FS.set_variable('Ravu', np.abs(treatment - 1))
-            #   index_step = STEP_TO_SAVE.index(step)
-            #   action[index_step] = FS._variables['Ravu']
+
             if step in STEP_TO_SAVE:
                 index_var = 0
                 index_step = STEP_TO_SAVE.index(step)
