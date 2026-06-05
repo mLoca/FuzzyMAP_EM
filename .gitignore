@@ -1,0 +1,7 @@
+models/trainable/fuzzy_static_EM.py
+res/
+__pycache__/
+*.pyc
+.idea/
+.venv/
+.venv/lib/
