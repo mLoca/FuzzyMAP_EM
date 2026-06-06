@@ -117,7 +117,13 @@ class FuzzyPOMDP(PomdpEM):
             # compute the membership degree
             if variable in self.obs_var_index:
                 idx = self.obs_var_index[variable]
-                vals = points[:, idx]
+                vals = points[:, idx].copy()
+                
+                if variable in self.fuzzy_model._variables:
+                    uod = self.fuzzy_model._variables[variable]._universe_of_discourse
+                    if uod is not None:
+                        vals = np.clip(vals, uod[0] + 0.01, uod[1] - 0.01)
+
                 membership_degree = np.array([fuzzy_set.get_value(v) for v in vals])
             elif action is not None:
                 membership_degree = fuzzy_set.get_value(action)
@@ -177,9 +183,9 @@ class FuzzyPOMDP(PomdpEM):
         Return the consequent value given the observation model.
         In this case the consequent is modelled as a (linear) function.
         """
-        if 'next_test' in rule or 'next_symptoms' in rule:
+        if 'next_test' in rule or 'next_symptoms' in rule or 'next_' in rule:
 
-            function_str = consequent.split("IS")[1][1:5]
+            function_str = consequent.split("IS")[1].replace(")", "").strip()
             term = consequent.split("IS")[0].replace("(", "").strip()
             clean_term = term.replace("next_", "").strip()
             fun = self.fuzzy_model._outputfunctions[function_str]
@@ -187,7 +193,12 @@ class FuzzyPOMDP(PomdpEM):
             for var in self.obs_var_index.keys():
                 if var in fun:
                     idx = self.obs_var_index[var]
-                    fun = fun.replace(var, str(self.obs_means[state][idx]))
+                    val = self.obs_means[state][idx]
+                    if var in self.fuzzy_model._variables:
+                        uod = self.fuzzy_model._variables[var]._universe_of_discourse
+                        if uod is not None:
+                            val = np.clip(val, uod[0] + 0.01, uod[1] - 0.01)
+                    fun = fun.replace(var, str(val))
 
             if 'action' in fun:
                 fun = fun.replace('action', str(action))
@@ -202,6 +213,16 @@ class FuzzyPOMDP(PomdpEM):
             loc=self.obs_means[state][obs_idx],
             scale=np.sqrt(np.diag(self.obs_covs[state])[obs_idx])
         )
+
+        max_pdf = norm.pdf(
+            self.obs_means[state][obs_idx],
+            loc=self.obs_means[state][obs_idx],
+            scale=np.sqrt(np.diag(self.obs_covs[state])[obs_idx])
+        ) 
+        
+        if max_pdf > 0:
+            marginal_likelihood /= max_pdf
+#
         return marginal_likelihood
 
     def _compute_fuzzy_pseudo_counts(self):
@@ -218,28 +239,57 @@ class FuzzyPOMDP(PomdpEM):
 
         for s in range(self.n_states):
             for a in range(self.n_actions):
+                
+                # Group rules by output variable
+                pred_sum = np.zeros(self.obs_dim)
+                weight_sum = np.zeros(self.obs_dim)
+                
                 for rule in rules:
                     match_score = self._match_rule_ant(rule, a, s)
-                    cons_s, var_name = self._match_rule_cons(rule, a, s)
-
                     if match_score < 1e-9: continue
-
+                    
+                    cons_s, var_name = self._match_rule_cons(rule, a, s)
                     clean_var_name = var_name.replace("next_", "").strip()
                     idx = self.obs_var_index.get(clean_var_name)
-
                     if idx is None: continue
+                    
+                    pred_sum[idx] += match_score * cons_s
+                    weight_sum[idx] += match_score
+                
+                # If no rules fired, skip
+                if np.sum(weight_sum) < 1e-9:
+                    continue
+                
+                # Compute crisp prediction vector
+                crisp_pred = np.zeros(self.obs_dim)
+                for i in range(self.obs_dim):
+                    if weight_sum[i] > 1e-9:
+                        crisp_pred[i] = pred_sum[i] / weight_sum[i]
+                    else:
+                        crisp_pred[i] = self.obs_means[s][i] # fallback
+                        
+                # Use the average weight as the overall match score
+                overall_match_score = np.mean(weight_sum)
+                
+                # Now distribute this expected crisp prediction to s_prime
+                raw_pdfs = np.zeros(self.n_states)
+                for s_prime in range(self.n_states):
+                    ll = 1.0
+                    for i in range(self.obs_dim):
+                        ll *= self._marginal_likelihood(crisp_pred[i], s_prime, i)
+                    raw_pdfs[s_prime] = ll
+                
+                sum_pdfs = np.sum(raw_pdfs) + 1e-10 
+                normalized_pdfs = raw_pdfs / sum_pdfs
 
-                    for s_prime in range(self.n_states):
-                        strength = match_score * self.transitions[s, a, s_prime]
-                        pseudo_count_O_den[s_prime] += strength
-
-                        mean_copy = np.copy(self.obs_means[s])
-                        mean_copy[idx] = cons_s
-                        pdf_s_prime = self._marginal_likelihood(cons_s, s_prime, idx)
-
-                        pseudo_count_O_mean[s_prime, :] += strength * mean_copy
-                        pseudo_count_T[s, a, s_prime] += match_score * pdf_s_prime
-                        pseudo_count_O_cov[s_prime, :, :] += strength * np.outer(mean_copy, mean_copy)
+                for s_prime in range(self.n_states):
+                    strength = overall_match_score * self.transitions[s, a, s_prime]
+                    
+                    pseudo_count_O_den[s_prime] += strength
+                    pseudo_count_O_mean[s_prime, :] += strength * crisp_pred
+                    pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 1.0)
+                    
+                    pseudo_count_T[s, a, s_prime] += overall_match_score * raw_pdfs[s_prime]
 
         return pseudo_count_T, pseudo_count_O_den, pseudo_count_O_mean, pseudo_count_O_cov
 

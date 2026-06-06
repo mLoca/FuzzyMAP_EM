@@ -80,7 +80,7 @@ class PomdpEM:
             obs_probs[:, s] = multivariate_normal.pdf(observations, mean=self.obs_means[s], cov=cov,
                                                       allow_singular=True)
 
-        obs_probs[obs_probs < 1e-50] = 1e-51
+        obs_probs[obs_probs < 1e-19] = 1e-18
         return obs_probs
 
     def forward_pass(self, obs_probs, actions):
@@ -291,3 +291,6 @@ class PomdpEM:
             raise Exception(e)
 
         return log_likelihood
+    
+
+

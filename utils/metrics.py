@@ -6,6 +6,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.stats import multivariate_normal
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy.stats import norm
 
 
 def _from_beta_to_multivariate_normal(obs_model_real, state_name):
@@ -237,7 +238,7 @@ def visualize_L1_trials(results, noise_level=0.01, env_name='', folder_name=''):
                framealpha=0.8
                )
     path = folder_name + "avg_l1_error_" + env_name + '_SD' + str(noise_level) + '.png'
-    plt.savefig(path, bbox_inches='tight', pad_inches=0.05)
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.05, dpi=300)
     plt.tight_layout()
     plt.show()
 
@@ -295,10 +296,80 @@ def visualize_KL_trials(results, noise_level='', env_name='',  folder_name=''):
                loc='upper right',
                framealpha=0.8)
     path =  path = folder_name + "KL_divergence_" + env_name + '_SD' + str(noise_level) + '.png'
-    plt.savefig(path, bbox_inches='tight', pad_inches=0.05)
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.05, dpi=300)
     plt.tight_layout()
     plt.show()
 
+
+def plot_state_observation_distributions(model, feature_names=None, save_path=None):
+    """
+    Plots the Gaussian observation distributions for each hidden state in the POMDP.
+    Creates one figure with subplots for each observation dimension.
+    
+    :param model: The trained POMDP model (PomdpEM or FuzzyMAP_EM)
+    :param feature_names: List of strings for the axes labels (e.g., ['T1', 'T2', 'V', 'E'])
+    :param save_path: Optional path to save the generated figure
+    """
+    # Ensure arrays are numpy formats
+    obs_means = np.array(model.obs_means)
+    obs_covs = np.array(model.obs_covs)
+    
+    n_states = obs_means.shape[0]
+    obs_dim = obs_means.shape[1]
+    
+    # Fallback if no feature names are provided
+    if feature_names is None:
+        feature_names = [f"Feature {i}" for i in range(obs_dim)]
+        
+    # Set up the figure: 1 row, 'obs_dim' columns
+    fig, axes = plt.subplots(1, obs_dim, figsize=(4 * obs_dim, 4.5))
+    if obs_dim == 1:
+        axes = [axes]
+        
+    # Use a distinct color palette for the states
+    colors = plt.cm.get_cmap('tab10', n_states)
+
+    for obs_idx in range(obs_dim):
+        ax = axes[obs_idx]
+        
+        # 1. Find a sensible X-axis range for this specific feature
+        # Look at all state means for this feature and add/subtract 3 standard deviations
+        stds = [np.sqrt(max(obs_covs[s, obs_idx, obs_idx], 1e-9)) for s in range(n_states)]
+        x_min = np.min(obs_means[:, obs_idx]) - 3 * max(stds)
+        x_max = np.max(obs_means[:, obs_idx]) + 3 * max(stds)
+        
+        x = np.linspace(x_min, x_max, 500)
+        
+        # 2. Plot the Gaussian curve for each hidden state
+        for state in range(n_states):
+            mean = obs_means[state, obs_idx]
+            variance = obs_covs[state, obs_idx, obs_idx]
+            std_dev = np.sqrt(max(variance, 1e-9))  # Guard against negative/zero variance
+            
+            # Generate Probability Density Function
+            pdf = norm.pdf(x, loc=mean, scale=std_dev)
+            
+            # Plot line and fill area under the curve
+            ax.plot(x, pdf, label=f'State {state}', color=colors(state), lw=2)
+            ax.fill_between(x, pdf, alpha=0.1, color=colors(state))
+            
+        ax.set_title(f'{feature_names[obs_idx]} Emission Model')
+        ax.set_xlabel('Value (z-score)')
+        ax.set_ylabel('Probability Density')
+        ax.grid(True, linestyle='--', alpha=0.6)
+        
+        # Only put the legend on the last subplot to save space
+        if obs_idx == obs_dim - 1:
+            ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Hidden States")
+
+    plt.suptitle('POMDP Hidden State Observation Distributions', fontsize=14, y=1.05)
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Distributions plot saved to {save_path}")
+        
+    #plt.show()
 
 def plot_grid_search_heatmap(experiment_results, metric_key='final_kl',
                              param1='lambda_T', param2='lambda_O',
@@ -416,3 +487,94 @@ def _compute_lim_from_ci(plot_obj, margin=0.1, vmax=None, vmin=None):
     y_min, y_max = _compute_lim_from_values(all_vertices[:, 1], margin=margin, vmax=vmax, vmin=vmin)
 
     return y_min, y_max
+
+def _parse_trajectory(trajectory):
+    """
+    Helper to parse a flat trajectory list [o_0, a_0, o_1, a_1, o_2] 
+    into separate observation and action sequences expected by PomdpEM.
+    """
+    # If the trajectory is already split into a tuple, return it directly
+    if isinstance(trajectory, tuple) and len(trajectory) == 2:
+        return np.array(trajectory[0]), np.array(trajectory[1])
+        
+    obs_seq = []
+    act_seq = []
+    for i, item in enumerate(trajectory):
+        if i % 2 == 0:
+            obs_seq.append(item)
+        else:
+            act_seq.append(int(item))
+            
+    return np.array(obs_seq), np.array(act_seq)
+
+
+def compute_log_likelihood(model, obs_seqs, act_seqs):
+    """
+    Computes the average predictive log-likelihood of a held-out test set.
+    
+    :param model: The trained POMDP model (PomdpEM or FuzzyMAP_EM)
+    :param obs_seqs: List of observation sequences
+    :param act_seqs: List of action sequences
+    :return: Average log-likelihood per trajectory
+    """
+    total_ll = 0.0
+    
+    for i in range(len(obs_seqs)):
+        obs_seq = obs_seqs[i]
+        act_seq = act_seqs[i]
+        
+        # Use the model's internal methods to compute the emission probabilities P(o|s)
+        obs_probs = model._compute_emission_matrix(obs_seq)
+        
+        # The forward pass returns the filtered belief states (alpha), 
+        # the log likelihood of the sequence, and the scaling factors (c)
+        _, seq_ll, _ = model.forward_pass(obs_probs, act_seq)
+        
+        total_ll += seq_ll
+        
+    # Return the average log-likelihood across all test trajectories
+    return total_ll / len(obs_seqs) if len(obs_seqs) > 0 else 0.0
+
+
+def compute_avg_l1_error(model, obs_seqs, act_seqs):
+    """
+    Computes the one-step-ahead observation L1 error on a test set.
+    Evaluates how accurately the model predicts the continuous vital signs at t+1.
+    
+    :param model: The trained POMDP model
+    :param obs_seqs: List of observation sequences
+    :param act_seqs: List of action sequences
+    :return: Average L1 error across all prediction steps
+    """
+    total_l1 = 0.0
+    count = 0
+    
+    for i in range(len(obs_seqs)):
+        obs_seq = obs_seqs[i]
+        act_seq = act_seqs[i]
+        
+        # Compute emissions and run forward pass to extract belief states
+        obs_probs = model._compute_emission_matrix(obs_seq)
+        alpha, _, _ = model.forward_pass(obs_probs, act_seq)
+        
+        # alpha[t] represents the normalized belief state b_t
+        for t in range(len(act_seq)):
+            b_t = alpha[t]
+            action = act_seq[t]
+            actual_next_obs = obs_seq[t+1]
+            
+            # 1. Predict the next state distribution: P(s_{t+1} | b_t, a_t)
+            # model.transitions is shape (n_states, n_actions, n_states) -> P(s' | s, a)
+            trans_matrix = model.transitions[:, action, :] 
+            next_state_probs = b_t @ trans_matrix
+            
+            # 2. Predict the next continuous observation: E[o_{t+1} | s_{t+1}]
+            # Because the emissions are Gaussian, the expected value is the weighted mean
+            expected_obs = next_state_probs @ model.obs_means
+            
+            # 3. Calculate L1 error (Mean Absolute Error across the continuous dimensions)
+            l1 = np.mean(np.abs(expected_obs - actual_next_obs))
+            total_l1 += l1
+            count += 1
+            
+    return total_l1 / count if count > 0 else 0.0

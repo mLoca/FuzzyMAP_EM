@@ -23,7 +23,6 @@ def from_matrix_to_triplelist(transition_matrix, states=None, actions=None):
                         (action, state, next_state): transition_matrix[i][j][k]
                     })
                 else:
-                    # throw an error if the transition probability is negative
                     raise ValueError(f"Transition probability for action {action}, state {state}, "
                                      f"next state {next_state} is negative: {transition_matrix[i][j][k]}")
     return triples

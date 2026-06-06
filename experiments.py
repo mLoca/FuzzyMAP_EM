@@ -1,3 +1,6 @@
+import torch
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import os
 import pickle
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -9,8 +12,17 @@ import itertools
 import copy
 from pomdp_py import Agent, Environment
 
+from envs.hybrid_light_dark_env import overwrite_config
+from fuzzy.lightdark_fuzzy import build_lightdark_fuzzymodel
 import utils.utils as utils
 from envs.continuous_medical_pomdp import ContinuousObservationModel
+from models.trainable.fuzzy_static_EM import FuzzyStaticPOMDP
+from POMDPPlanners.environments import DiscreteLightDarkPOMDP
+from POMDPPlanners.environments.light_dark_pomdp.discrete_light_dark_pomdp import ObservationModelType
+from POMDPPlanners.environments.light_dark_pomdp.continuous_light_dark_pomdp import (
+    ContinuousLightDarkPOMDPDiscreteActions, RewardModelType
+)
+from envs.hybrid_light_dark_env import LDState, LDTransitionModel, LDObservationModel, LDRewardModel, LDPolicyModel
 
 from models.trainable.pomdp_EM import PomdpEM
 from models.trainable.pomdp_MAP_EM import PomdpMAPEM
@@ -26,6 +38,13 @@ obs_index = {"test": 0, "symptoms": 1}
 
 class SyntheticEnvironment:
     def __init__(self, config, distribution_type="mvn"):
+
+        self.env_type = config.get("env_type", "medical")
+        if self.env_type != "medical":
+            self.grid_size = config.get("grid_size", 11)
+            slip_prob = config.get("slip_prob", 0.05)
+            #Overwrite the config
+            config = overwrite_config(config, grid_size=self.grid_size, slip_prob=slip_prob)
         self.n_states = config['n_states']
         self.n_actions = config['n_actions']
         self.obs_dim = config['obs_dim']
@@ -58,31 +77,53 @@ class SyntheticEnvironment:
         self.pomdp = self._generate_POMDP(config)
 
     def _generate_POMDP(self, config):
-        transition_model = MedicalTransitionModel(config["states"], self.true_transitions)
-        obs_model = ContinuousObservationModel(config["states"], config["actions"], self.true_observations,
-                                               distribution=self.distribution_type)
-        # Reward and Policy models are needed for the Agent structure but not for data generation logic
-        policy_model = MedicalPolicyModel()
+        #TODO clean using oobjects 
+        if self.env_type == "medical":
+            transition_model = MedicalTransitionModel(config["states"], self.true_transitions)
+            obs_model = ContinuousObservationModel(config["states"], config["actions"], self.true_observations,
+                                                distribution=self.distribution_type)
+            # Reward and Policy models are needed for the Agent structure but not for data generation logic
+            policy_model = MedicalPolicyModel()
 
-        init_belief = pomdp_py.Histogram({
-            State("healthy"): 1 / 3,
-            State("sick"): 1 / 3,
-            State("critical"): 1 / 3
-        })
+            init_belief = pomdp_py.Histogram({
+                State("healthy"): 1 / 3,
+                State("sick"): 1 / 3,
+                State("critical"): 1 / 3
+            })
 
-        # NOTE: reward model is not used in data generation
-        reward_model = MedicalRewardModel()
+            # NOTE: reward model is not used in data generation
+            reward_model = MedicalRewardModel()
 
-        agent = Agent(
-            init_belief=init_belief,
-            policy_model=policy_model,
-            transition_model=transition_model,
-            observation_model=obs_model,
-            reward_model=reward_model)
+            agent = Agent(
+                init_belief=init_belief,
+                policy_model=policy_model,
+                transition_model=transition_model,
+                observation_model=obs_model,
+                reward_model=reward_model)
 
-        env = Environment(init_state=State(random.choice(config["states"])),
-                          transition_model=transition_model,
-                          reward_model=reward_model)
+            env = Environment(init_state=State(random.choice(config["states"])),
+                            transition_model=transition_model,
+                            reward_model=reward_model)
+        else:
+            transition_model = LDTransitionModel(self.states, self.true_transitions)
+            obs_model = LDObservationModel(self.true_observations)
+            reward_model = LDRewardModel()
+            policy_model = LDPolicyModel(self.actions)
+
+            # Uniform belief distribution across all spatial grids
+
+            start_state_name = f"s_{5 * self.grid_size + 0}" # State index 55
+            
+            belief_dict = {LDState(s, 0, 0): 0.0 for s in self.states}
+            belief_dict[LDState(start_state_name, 0, 0)] = 1.0
+            init_belief = pomdp_py.Histogram(belief_dict)   
+
+            agent = Agent(init_belief, policy_model, transition_model, obs_model, reward_model)
+            
+            # Start at standard location: x=0, y=5 (State index 55)
+            start_state_name = f"s_{5 * self.grid_size + 5}"
+            env = Environment(LDState(start_state_name, 0, 5), transition_model, reward_model)
+            return pomdp_py.POMDP(agent, env)
 
         return pomdp_py.POMDP(agent, env)
 
@@ -91,11 +132,18 @@ class SyntheticEnvironment:
         Create a new POMDP instance from an existing one.
         This is useful for resetting the environment.
         """
-        init_belief = pomdp_py.Histogram({
-            State("healthy"): 1 / 3,
-            State("sick"): 1 / 3,
-            State("critical"): 1 / 3
-        })
+        if getattr(self, 'env_type', 'medical') == 'lightdark':
+            start_state_name = f"s_{5 * self.grid_size + 0}"
+            belief_dict = {LDState(s, 0, 0): 0.0 for s in self.states}
+            belief_dict[LDState(start_state_name, 0, 0)] = 1.0
+            
+            init_belief = pomdp_py.Histogram(belief_dict)
+        else:
+            init_belief = pomdp_py.Histogram({
+                State("healthy"): 1 / 3,
+                State("sick"): 1 / 3,
+                State("critical"): 1 / 3
+            })
 
         self.pomdp.agent.set_belief(init_belief, prior=True)
         self.pomdp.agent.tree = None
@@ -128,6 +176,69 @@ class SyntheticEnvironment:
             actions.append(act_seq)
 
         return observations, actions
+
+
+class LaserTagEnvironmentWrapper:
+    def __init__(self, config, distribution_type="mvn"):
+        self.config = config
+        discount = config.get("discount_factor", 0.95)
+        self.env = DiscreteLightDarkPOMDP(discount_factor=discount, observation_model_type=ObservationModelType.DISTANCE_BASED)
+        self.env_tmp = ContinuousLightDarkPOMDPDiscreteActions(
+                        discount_factor=0.95,
+                        goal_state=np.array([10, 5]),
+                        start_state=np.array([0, 5]),
+                        reward_model_type=RewardModelType.CONSTANT_HAZARD_PENALTY,
+                        obstacles=[]
+                    )
+        
+        self.n_states = config.get("n_states", 5)
+        self.actions = ['up', 'down', 'right', 'left', 'tag']
+        self.n_actions = len(self.actions)
+        self.obs_dim = 8
+        self.states = [f"state_{i}" for i in range(self.n_states)]
+        
+        self.original_transitions = None
+        self.original_observations = None
+        self.distribution_type = "mvn"
+        
+        self.real_parameters = {
+            "robot_transition_cov": self.env.robot_transition_cov_matrix,
+            "opponent_transition_cov": self.env.opponent_transition_cov_matrix,
+            "measurement_noise": self.env.measurement_noise
+        }
+
+    def generate_data(self, data_size, seq_length, noise_sd, seed=None):
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+            
+        observations = []
+        actions_list = []
+        
+        for _ in range(data_size):
+            obs_seq = []
+            act_seq = []
+            
+            robot_x = np.random.uniform(0, self.env.grid_size[0])
+            robot_y = np.random.uniform(0, self.env.grid_size[1])
+            opp_x = np.random.uniform(0, self.env.grid_size[0])
+            opp_y = np.random.uniform(0, self.env.grid_size[1])
+            current_state = np.array([robot_x, robot_y, opp_x, opp_y, 0.0])
+            
+            for _ in range(seq_length):
+                action_idx = random.randint(0, self.n_actions - 1)
+                action_str = self.actions[action_idx]
+                
+                next_state, obs, reward = self.env.sample_next_step(current_state, action_str)
+                current_state = next_state
+                
+                obs_seq.append(obs)
+                act_seq.append(action_idx)
+                
+            observations.append(obs_seq)
+            actions_list.append(act_seq)
+            
+        return observations, actions_list
 
 
 def _expand_models_for_grid_search_(config_models):
@@ -196,6 +307,12 @@ def _instantiate_model_from_config(model_config, env, fuzzy_model, seed):
                            **model_params)
     elif model_cls == "PomdpMAPEM":
         model = PomdpMAPEM(**common_args, **model_params)
+    elif model_cls == "FuzzyStaticPOMDP":
+        model = FuzzyStaticPOMDP(**common_args,
+                           fuzzy_model=fuzzy_model,
+                           obs_var_index=obs_index,
+                           ensure_psd=True,
+                           **model_params)
     else:
         raise ValueError(f"Unknown model class: {model_cls}")
 
@@ -252,13 +369,22 @@ def _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model, seed, s
             tolerance=float(standard_param.get("tolerance", 1e-4))
         )
 
-        metrics = compute_error_metrics(
-            model,
-            env.original_transitions,
-            env.original_observations,
-            env.states,
-            dist_type=env.distribution_type
-        )
+        if env.original_transitions is None:
+            metrics = {
+                "final_kl": [0.0] * model.n_states,
+                "avg_l1_error": 0.0,
+                "perm_map": {},
+                "perm_ord": np.arange(model.n_states),
+                "real_parameters": getattr(env, "real_parameters", {})
+            }
+        else:
+            metrics = compute_error_metrics(
+                model,
+                env.original_transitions,
+                env.original_observations,
+                env.states,
+                dist_type=env.distribution_type
+            )
 
         elapsed_time = time.time() - start_time
         print(f" ... {model_name} finished in {elapsed_time:.2f}s. Final LL: {fit_ll:.2f}")
@@ -276,6 +402,11 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
     Generates ONE dataset for this run_id/size.
     Evaluates ALL models in 'model_configs_list' on this exact dataset.
     """
+    env_type = env_config.get("env_type", "medical")
+    if env_type == "lightdark":
+        obs_index = {"x_coord": 0, "y_coord": 1}
+    else:
+        obs_index = {"test": 0, "symptoms": 1}
 
     if not os.path.exists(cache_dir) and use_cache:
         os.makedirs(cache_dir, exist_ok=True)
@@ -289,10 +420,16 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
 
     # Generate dataset
     dist_type = env_config.get("distribution_type", "mvn")
+    
     env = SyntheticEnvironment(env_config, distribution_type=dist_type)
+        
     obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=current_seed)
 
-    fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed)
+    if env_type == "lightdark":
+        expert_type = standard_param.get("expert_type", "good") 
+        fuzzy_model = build_lightdark_fuzzymodel(grid_size=env_config.get("grid_size", 11), expert_type=expert_type)
+    else:
+        fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed)
 
     np.random.seed(current_seed)
     random.seed(current_seed)
@@ -407,6 +544,7 @@ def main():
     for exp_id, env_results in results_summary.items():
         print(f"Experiment {exp_id}:")
         folder_name = env_results.pop('folder_name', 'res/')
+        os.makedirs(folder_name, exist_ok=True)
         for env_name, model_results in env_results.items():
             if "grid_search" in exp_id:
                 plot_grid_search_heatmap(
