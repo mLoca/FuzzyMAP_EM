@@ -1,4 +1,5 @@
 import argparse
+import torch
 import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
@@ -76,7 +77,7 @@ class TrueHIVEnvironmentWrapper:
             cov=np.eye(len(next_state)) * 0.05**2
         )
 
-def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=10):
+def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=100):
     """
     Evaluates a policy trained on a Learned Environment inside a True Environment.
     """
@@ -147,11 +148,11 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         "n_simulations":100,
         "depth": 50,
         "discount_factor": 0.95,
-        "exploration_constant": 1.0,
-        "k_o": 2.0,      # Observation widening multiplier
-        "alpha_o": 0.5,   # Observation widening exponent
-        "k_a": 5.0,      # Set this slightly higher than your n_actions
-        "alpha_a": 0.0
+        "exploration_constant": 10.0,
+        "k_o": 10,
+        "k_a": 4,
+        "alpha_o": 0.01,
+        "alpha_a": 0.01,
     }
 
     # Swap POMCP for PFT_DPW
@@ -214,6 +215,8 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
 
     print("\n Performance Results:")
     print(f"Standard: {np.mean(std_returns)}.    Fuzzy:{np.mean(fuzzy_returns)}")
+    print(f"Standard 95% CI: [{scipy.stats.norm.interval(0.95, loc=np.mean(std_returns), scale=scipy.stats.sem(std_returns))}]")
+    print(f"Fuzzy 95% CI: [{scipy.stats.norm.interval(0.95, loc=np.mean(fuzzy_returns), scale=scipy.stats.sem(fuzzy_returns))}]")
     #results, statistics_df  = api.run_multiple_environments_and_policies(
     #    environment_run_params=environment_run_params,
     #    alpha=0.1,
@@ -281,8 +284,8 @@ def run_hiv_benchmark_with_ci(args):
 
     for trial in range(args.n_runs):
         print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
-        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=5, seed=42 + trial)
-        train_obs, train_acts = data_gen.generate(n_patients=50)
+        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=100, seed=42 + trial)
+        train_obs, train_acts = data_gen.generate(n_patients=150)
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
         for n_train in args.train_sizes:
@@ -302,6 +305,7 @@ def run_hiv_benchmark_with_ci(args):
                 fuzzy_model=HIVExpert5DModel().get_model(),
                 hyperparameter_update_method="adaptive",
                 obs_var_index=hiv_var_mapping,
+                alpha_ah=0.1,
                 use_fuzzy=True,
                 ensure_psd=True,
                 parallel=False,
@@ -382,10 +386,10 @@ if __name__ == "__main__":
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=1, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=5, help="Transition fuzzy weight")
     parser.add_argument("--lambda_o", type=float, default=0.1, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.001, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[5, 10, 25, 150])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[5, 10, 25])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()

@@ -15,6 +15,8 @@ import numpy as np
 import scipy.stats 
 from scipy.stats import multivariate_normal
 
+eps_values_for_actions = np.array([[0., 0.], [.7, 0.], [0., .3], [.7, .3]])
+
 class DiscreteStateDistribution:
     def __init__(self, probabilities):
         self.probabilities = probabilities
@@ -57,10 +59,12 @@ class LearnedHIVEnvironment(Environment):
         #return self.hiv_reward_function(state, action, next_state)
         expected_obs = self.mu[state]
 
+        eps1, eps2 = eps_values_for_actions[action]
+
         V = expected_obs[2]
         E = expected_obs[3]
         
-        reward = (-10.0 * V) + (10.0 * E)
+        reward = (-0.1 * 10 ** V) - 2e4 * eps1 ** 2 - 2e3 * eps2 ** 2 + (1e3 * 10 **E )
         return reward
 
     def is_terminal(self, state):

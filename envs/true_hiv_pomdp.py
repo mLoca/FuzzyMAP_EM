@@ -71,8 +71,10 @@ class TrueHIVEnvironment(Environment):
         return np.array([T1, T2, V, E], dtype=float)
 
     def reward(self, state, action, next_state= 0):
-        
-        return self.sim.calc_reward(action=action, state= next_state)
+        self.sim.logspace = False
+        reward =  self.sim.calc_reward(action=action, state= next_state)
+        self.sim.logspace = True
+        return reward
 
     def is_terminal(self, state):
         return False
