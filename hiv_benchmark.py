@@ -1,68 +1,267 @@
 import argparse
 import numpy as np
+import scipy.stats
 import matplotlib.pyplot as plt
+from joblib import Parallel, delayed
 from fuzzy.hiv_fuzzy import HIVExpert5DModel
 
 # Import the custom simulator instead of whynot
 from hiv_simulator import HIVSimulator
+from utils.utils import my_hiv_reward_fn
 
 # Import your existing models and metrics
 from models.trainable.pomdp_EM import PomdpEM as POMDP_EM
 from models.trainable.fuzzy_EM import FuzzyPOMDP as FuzzyMAP_EM
-from utils.metrics import compute_avg_l1_error, compute_log_likelihood, plot_state_observation_distributions
+from utils.metrics import compute_avg_l1_error, compute_log_likelihood
+from pathlib import Path
 
+# ==============================================================================
+# yaacovpariente/POMDPPlanners INTEGRATION
+# ==============================================================================
 
+from POMDPPlanners.planners.mcts_planners.pft_dpw import PFT_DPW
+from POMDPPlanners.planners.mcts_planners.pomcp import POMCP
+from POMDPPlanners.planners.mcts_planners.pomcpow import POMCPOW
+from POMDPPlanners.simulations.episodes import run_episode
+from POMDPPlanners.utils.action_samplers import DiscreteActionSampler
+from POMDPPlanners.core.environment import (
+    Environment,
+    DiscreteActionsEnvironment,
+    SpaceInfo,
+    SpaceType,
+)
+from POMDPPlanners.core.belief import get_initial_belief
+from POMDPPlanners.utils.belief_factory import create_environment_belief
+from POMDPPlanners.simulations.simulation_apis.local_simulations_api import LocalSimulationsAPI
+from POMDPPlanners.core.simulation import EnvironmentRunParams
+from POMDPPlanners.utils.logger import get_logger
+
+POMDPPLANNERS_AVAILABLE = True
+#except ImportError:
+#    POMDPPLANNERS_AVAILABLE = False
+#    print("Warning: POMDPPlanners not found. Planning benchmark will be skipped unless installed.")
+from envs.custom_env_to_plan import LearnedHIVEnvironment
+from envs.true_hiv_pomdp import TrueHIVEnvironment
+
+class TrueHIVEnvironmentWrapper:
+    """ 
+    Wraps the HIVSimulator to conform to the POMDPPlanners Environment generative interface.
+    The evaluator uses this to step the TRUE biological reality.
+    """
+    def __init__(self, hiv_sim):
+        self.env = hiv_sim
+        self.discount_factor = 0.95
+        self.name = "TrueHIVEnvironment"
+
+    def get_actions(self):
+        return list(range(self.env.num_actions))
+
+    def sample_initial_state(self):
+        return self.env.reset(perturb_params=True)
+
+    def step(self, state, action):
+        # Override the simulator's internal state to ensure stateless MCTS simulations
+        self.env.state = state
+        next_state, reward, done, info = self.env.step(action)
+        
+        # Emulate the clinical measurement noise present in the training set
+        obs = next_state + np.random.normal(0, 0.05, size=next_state.shape)
+        return next_state, tuple(obs), float(reward), done, info
+
+    def observation_probability(self, action, next_state, observation):
+        """ Needed for particle filtering if the True env is queried for density """
+        return scipy.stats.multivariate_normal.pdf(
+            observation, 
+            mean=next_state, 
+            cov=np.eye(len(next_state)) * 0.05**2
+        )
+
+def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=10):
+    """
+    Evaluates a policy trained on a Learned Environment inside a True Environment.
+    """
+    # 1. The Body: Initialize true biological reality (6D array)
+    seed =42 * episode
+    np.random.seed(seed)
+    true_state = true_env.initial_state_dist().sample()[0]
+    
+    # 2. The Brain: Initialize the AI's mental state (over states 0, 1, 2)
+    # We use .copy() so parallel episodes don't share the same memory
+    import copy
+    belief = copy.deepcopy(initial_belief)
+    
+    total_reward = 0.0
+    
+    for step in range(max_steps):
+        try:
+            action = policy.plan(belief)
+        except AttributeError:
+            action = policy.action(belief)
+        
+        action = action[0][0]
+
+        next_true_state = true_env.sample_next_state(true_state, action)
+
+        obs = true_env.sample_observation(next_true_state, action)
+        
+        reward = true_env.reward(true_state, action, next_true_state)
+        total_reward += reward
+        
+        if true_env.is_terminal(next_true_state):
+            break
+            
+
+        belief.update(action, obs, pomdp=policy.environment)
+            
+        # Move time forward
+        true_state = next_true_state
+        
+    return total_reward
+
+def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50, horizon=15):
+    std_params = {
+        "T": em_model.transitions,          
+        "mu": em_model.obs_means,     
+        "Sigma": em_model.obs_covs    
+    }
+
+    fuzzy_params = {
+        "T": fuzzy_model.transitions,
+        "mu": fuzzy_model.obs_means,
+        "Sigma": fuzzy_model.obs_covs
+    }
+    
+
+    std_env = LearnedHIVEnvironment("std_env", std_params, my_hiv_reward_fn)
+    fuzzy_env = LearnedHIVEnvironment("fuzzy_env", fuzzy_params, my_hiv_reward_fn)
+
+    std_sampler = DiscreteActionSampler(std_env.get_actions())
+    fuzzy_sampler = DiscreteActionSampler(fuzzy_env.get_actions())
+
+    unhealthy_steady_state = [163573., 5., 11945., 46., 63919., 24.]
+    true_env = TrueHIVEnvironment(initial_biological_state=unhealthy_steady_state)
+
+    # 2. Configure the planners
+    # Note: You need to tune these hyperparameters based on your HIV benchmark
+    planner_config = {
+        "n_simulations":100,
+        "depth": 50,
+        "discount_factor": 0.95,
+        "exploration_constant": 1.0,
+        "k_o": 2.0,      # Observation widening multiplier
+        "alpha_o": 0.5,   # Observation widening exponent
+        "k_a": 5.0,      # Set this slightly higher than your n_actions
+        "alpha_a": 0.0
+    }
+
+    # Swap POMCP for PFT_DPW
+    std_policy = POMCPOW(std_env,action_sampler=std_sampler, name="PFT_DPW_Standard", **planner_config)
+    fuzzy_policy = POMCPOW(fuzzy_env,action_sampler=fuzzy_sampler, name="PFT_DPW_Fuzzy", **planner_config)
+
+    # 3. Setup Initial Beliefs (e.g., Uniform particle belief)
+    # You can customize this based on the POMDPPlanners documentation
+    initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
+
+    # 4. Run the Evaluation
+    api = LocalSimulationsAPI()
+    print("Evaluating Standard EM Model...")
+    #std_results = api.run_multiple_environments_and_policies(
+    #    environment_run_params=[
+    #        EnvironmentRunParams(
+    #            environment=std_env,
+    #            belief=initial_belief,
+    #            policies=[std_policy],
+    #            num_episodes=100,
+    #            num_steps=100
+    #        )
+    #    ],
+    #    alpha=0.1,  # Required by the API for risk metrics (CVaR/VaR)
+    #    confidence_interval_level=0.95,
+    #    experiment_name="Standard_EM_Evaluation"
+    #)
+    logger = get_logger("basic_example",
+                    output_dir=Path("/tmp/test_logs"),
+                    console_output=True)
+
+    #history = run_episode(
+    #    environment=true_env,
+    #    policy=fuzzy_policy,
+    #    initial_belief=initial_belief,
+    #    num_steps=5,
+    #    logger=logger
+    #)
+
+    environment_run_params=[
+        EnvironmentRunParams(
+            environment=true_env,
+            belief=initial_belief,
+            policies=[std_policy, fuzzy_policy],
+            num_episodes=15,
+            num_steps=10
+        ),
+    ]
+
+    print("Evaluating Fuzzy-MAP EM Model...")
+    print("Evaluating Standard EM Model in REALITY...")
+    std_returns = Parallel(n_jobs=-1)(
+        delayed(evaluate_cross_environment)(true_env, std_policy, initial_belief, episode = ep) 
+        for ep in range(100) # 100 episodes
+    )
+    fuzzy_returns = Parallel(n_jobs=-1)(
+        delayed(evaluate_cross_environment)(true_env, fuzzy_policy, initial_belief, episode = ep) 
+        for ep in range(100) # 100 episodes
+    )
+
+    print("\n Performance Results:")
+    print(f"Standard: {np.mean(std_returns)}.    Fuzzy:{np.mean(fuzzy_returns)}")
+    #results, statistics_df  = api.run_multiple_environments_and_policies(
+    #    environment_run_params=environment_run_params,
+    #    alpha=0.1,
+    #    confidence_interval_level=0.95,
+    #    experiment_name="Fuzzy_MAP_EM_Evaluation",
+    #    n_jobs=-1,
+    #    clear_cache_on_start=True
+    #)
+#
+#
+    ## Display results
+    #print("\\nPERFORMANCE RESULTS:")
+    #for env_name in statistics_df['environment'].unique():
+    #    env_results = statistics_df[statistics_df['environment'] == env_name]
+    #    print(f"\\n{env_name}:")
+    #    for _, row in env_results.iterrows():
+    #        print(f"  {row['policy']}: {row['average_return']:.3f} [{row['average_return_ci_lower']:.3f}, {row['average_return_ci_upper']:.3f}]")
+#
+    #print("\\nStudy complete! Check './planners_comparison_results' for detailed logs.")
+
+# ==============================================================================
+# DATASET GENERATION & BENCHMARK LOOP
+# ==============================================================================
 class HIVDatasetGenerator:
-    """
-    A streamlined data generator for creating offline HIV treatment trajectories.
-    Automatically handles POMDP masking, clinical noise, and formatting for EM models.
-    """
     def __init__(self, is_pomdp=True, max_steps=100, noise_std=0.05, seed=42):
         self.is_pomdp = is_pomdp
         self.max_steps = max_steps
         self.noise_std = noise_std
-        
-        # Initialize simulator (podmp=True applies the T1, T2, V, E mask automatically)
         self.env = HIVSimulator(podmp=self.is_pomdp, logspace=True)
-        
-        # Set seeds for reproducible datasets
         self.env.seed(seed)
         np.random.seed(seed)
 
     def generate(self, n_patients):
-        """
-        Generates clean observation and action sequences for a set number of patients.
-        
-        Returns:
-            observations: List of lists containing patient observation arrays.
-            actions: List of lists containing patient action integers.
-        """
         all_observations = []
         all_actions = []
 
         for _ in range(n_patients):
-            # perturb_params=True ensures biological diversity between patients
             true_state = self.env.reset(perturb_params=True)
-            
-            patient_obs = []
-            patient_acts = []
+            patient_obs, patient_acts = [], []
 
             for step in range(self.max_steps):
-                # 1. Add measurement noise to the observation
                 noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
                 patient_obs.append(noisy_obs)
-
-                # 2. Sample an action (Offline RL random behavioral policy)
                 action = np.random.randint(0, self.env.num_actions)
                 patient_acts.append(int(action))
-
-                # 3. Step the environment
                 true_state, reward, is_terminal, info = self.env.step(action)
-
-                if is_terminal:
-                    break
+                if is_terminal: break
             
-            # Record the final observation after the last action
             final_noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
             patient_obs.append(final_noisy_obs)
 
@@ -71,11 +270,8 @@ class HIVDatasetGenerator:
 
         return all_observations, all_actions
 
+
 def run_hiv_benchmark_with_ci(args):
-    """
-    Executes the data scarcity benchmark across multiple independent trials.
-    """
-    # Dictionary to store lists of results for each training size
     results = {
         'EM_L1': {s: [] for s in args.train_sizes},
         'Fuzzy_L1': {s: [] for s in args.train_sizes},
@@ -83,76 +279,64 @@ def run_hiv_benchmark_with_ci(args):
         'Fuzzy_LL': {s: [] for s in args.train_sizes}
     }
 
-
     for trial in range(args.n_runs):
-        print(f"\n==========================================")
-        print(f"       STARTING TRIAL {trial + 1}/{args.n_runs}")
-        print(f"==========================================")
-        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=0.05, max_steps=5, seed=42 + trial)
+        print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
+        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=5, seed=42 + trial)
         train_obs, train_acts = data_gen.generate(n_patients=50)
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
-
-        #data_gen_pomdp = HIVDatasetGenerator(is_pomdp=False, noise_std=0.001, max_steps=10)
-        #real_pomdp_data_train_obs, real_pomdp_data_train_acts = data_gen_pomdp.generate(n_patients=1000)
-        #test_pomdp_data_train_obs, test_pomdp_data_train_acts = data_gen_pomdp.generate(n_patients=1000)
-        #real_pomdp = POMDP_EM(n_states=args.n_states, n_actions=args.n_actions, obs_dim=6, verbose=True)
-        #real_pomdp.initialize_with_kmeans(real_pomdp_data_train_obs)
-        #print("\nFitting Real POMDP with Full Data...")       
-        #real_pomdp.fit(real_pomdp_data_train_obs, real_pomdp_data_train_acts, max_iterations=100)
-        #real_pomdp_l1 = compute_avg_l1_error(real_pomdp, test_pomdp_data_train_obs, test_pomdp_data_train_acts)
-        #real_pomdp_ll = compute_log_likelihood(real_pomdp, test_pomdp_data_train_obs, test_pomdp_data_train_acts)
-        #print(f"Real POMDP    -> L1: {real_pomdp_l1:.3f} | Test LL: {real_pomdp_ll:.3f}")
 
         for n_train in args.train_sizes:
             print(f"\n--- Evaluating Data Scarcity: N={n_train} ---")
             observations = train_obs[:n_train]
             actions = train_acts[:n_train]
             
-            # Initialize Models dynamically
             em_model = POMDP_EM(n_states=args.n_states, n_actions=args.n_actions, obs_dim=args.n_obs_dim)
-
             hiv_var_mapping = {"T1": 0, "T2": 1, "V":  2, "E":  3} 
+            
             fuzzy_model = FuzzyMAP_EM(
                 n_states=args.n_states, 
                 n_actions=args.n_actions, 
-                obs_dim=4,  
+                obs_dim=args.n_obs_dim,  
                 lambda_T=args.lambda_t, 
                 lambda_O=args.lambda_o,
-                fuzzy_model=HIVExpert5DModel().get_model(), # Use the new 5D class
+                fuzzy_model=HIVExpert5DModel().get_model(),
                 hyperparameter_update_method="adaptive",
-                obs_var_index=hiv_var_mapping ,
+                obs_var_index=hiv_var_mapping,
                 use_fuzzy=True,
                 ensure_psd=True,
                 parallel=False,
             )
 
-            #em_model.initialize_with_kmeans(observations)           
             em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
             em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
-
             print(f"Standard EM   -> L1: {em_l1:.3f} | Test LL: {em_ll:.3f}")
 
-            #fuzzy_model.initialize_with_kmeans(observations) 
             fuzzy_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             fuzzy_l1 = compute_avg_l1_error(fuzzy_model, test_obs, test_acts)
             fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)       
-            
+            print(f"Fuzzy-MAP EM  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
+
             results['EM_L1'][n_train].append(em_l1)
             results['Fuzzy_L1'][n_train].append(fuzzy_l1)
             results['EM_LL'][n_train].append(em_ll)
             results['Fuzzy_LL'][n_train].append(fuzzy_ll)
-
-            plot_state_observation_distributions(em_model, ["T1", "T2", "V", "E"], save_path=f'res/em_trial{trial+1}_n{n_train}.png')
-            plot_state_observation_distributions(fuzzy_model, ["T1", "T2", "V", "E"], save_path=f'res/fuzzy_trial{trial+1}_n{n_train}.png')
             
-            print(f"Fuzzy-MAP EM  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
+            # --- RUN PLANNING EVALUATION VIA LOCAL_SIMULATION_API ---
+            if True:
+                eval_env = HIVSimulator(podmp=True, logspace=True)
+                eval_env.seed(88 + trial)
+                evaluate_planning_performance(
+                    true_env=eval_env,
+                    em_model=em_model,
+                    fuzzy_model=fuzzy_model,
+                    n_episodes=20,
+                    horizon=10
+                )
 
     return results
 
 def plot_results_with_ci(train_sizes, results, save_path='res/custom_hiv_benchmark_ci.png'):
-    
-    # Helper function to extract mean and standard deviation
     def get_stats(metric_dict):
         means = [np.mean(metric_dict[s]) for s in train_sizes]
         stds = [np.std(metric_dict[s]) for s in train_sizes]
@@ -160,71 +344,50 @@ def plot_results_with_ci(train_sizes, results, save_path='res/custom_hiv_benchma
 
     em_ll_mean, em_ll_std = get_stats(results['EM_LL'])
     fuz_ll_mean, fuz_ll_std = get_stats(results['Fuzzy_LL'])
-    
     em_l1_mean, em_l1_std = get_stats(results['EM_L1'])
     fuz_l1_mean, fuz_l1_std = get_stats(results['Fuzzy_L1'])
 
     plt.figure(figsize=(12, 5))
 
-    # --- Log-Likelihood Plot ---
     plt.subplot(1, 2, 1)
-    plt.plot(train_sizes, em_ll_mean, label='Standard EM', marker='o', color='tab:blue')
-    plt.fill_between(train_sizes, em_ll_mean - em_ll_std, em_ll_mean + em_ll_std, color='tab:blue', alpha=0.2)
-    
-    plt.plot(train_sizes, fuz_ll_mean, label='Fuzzy-MAP EM', marker='s', color='tab:orange')
-    plt.fill_between(train_sizes, fuz_ll_mean - fuz_ll_std, fuz_ll_mean + fuz_ll_std, color='tab:orange', alpha=0.2)
-    
+    plt.plot(train_sizes, em_ll_mean, label='Standard EM', marker='o')
+    plt.fill_between(train_sizes, em_ll_mean - em_ll_std, em_ll_mean + em_ll_std, alpha=0.2)
+    plt.plot(train_sizes, fuz_ll_mean, label='Fuzzy-MAP EM', marker='s')
+    plt.fill_between(train_sizes, fuz_ll_mean - fuz_ll_std, fuz_ll_mean + fuz_ll_std, alpha=0.2)
     plt.xlabel('Training Set Size (Trajectories)')
     plt.ylabel('Held-out Test Log-Likelihood')
     plt.title('Generalization under Data Scarcity')
     plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
 
-    # --- L1 Error Plot ---
     plt.subplot(1, 2, 2)
-    plt.plot(train_sizes, em_l1_mean, label='Standard EM', marker='o', color='tab:blue')
-    plt.fill_between(train_sizes, em_l1_mean - em_l1_std, em_l1_mean + em_l1_std, color='tab:blue', alpha=0.2)
-    
-    plt.plot(train_sizes, fuz_l1_mean, label='Fuzzy-MAP EM', marker='s', color='tab:orange')
-    plt.fill_between(train_sizes, fuz_l1_mean - fuz_l1_std, fuz_l1_mean + fuz_l1_std, color='tab:orange', alpha=0.2)
-    
+    plt.plot(train_sizes, em_l1_mean, label='Standard EM', marker='o')
+    plt.fill_between(train_sizes, em_l1_mean - em_l1_std, em_l1_mean + em_l1_std, alpha=0.2)
+    plt.plot(train_sizes, fuz_l1_mean, label='Fuzzy-MAP EM', marker='s')
+    plt.fill_between(train_sizes, fuz_l1_mean - fuz_l1_std, fuz_l1_mean + fuz_l1_std, alpha=0.2)
     plt.xlabel('Training Set Size (Trajectories)')
     plt.ylabel('One-Step-Ahead L1 Error')
     plt.title('Predictive Accuracy')
     plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     print(f"\nStatistical plots saved successfully to {save_path}")
 
-    #plt.show()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
-    
-    # Run configuration
-    parser.add_argument("--n_runs", type=int, default=5, help="Number of independent trials to compute confidence intervals")
-    
-    # POMDP Dimensions
+    parser.add_argument("--n_runs", type=int, default=1, help="Number of independent trials to compute confidence intervals")
+    parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
     parser.add_argument("--n_states", type=int, default=3, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
-    
-    # Updated default to 4 dimensions based on the HIVSimulator mask [T1, T2, V, E]
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
-    
-    # Hyperparameters
     parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=0.2, help="Observation fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=1, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=0.1, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.001, help="Gaussian noise added to standardized observations")
-    
-    # Dataset splits
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[5, 10, 25])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[5, 10, 25, 150])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
-
-    # Run Benchmark & Plot
     results = run_hiv_benchmark_with_ci(args)
     plot_results_with_ci(args.train_sizes, results)

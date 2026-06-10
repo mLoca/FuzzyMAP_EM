@@ -102,3 +102,15 @@ def suppress_output():
         # Restore stdout
         sys.stdout.close()
         sys.stdout = original_stdout
+
+
+def my_hiv_reward_fn(state, action, next_state):
+    # Adjust the indices below based on your specific HIV benchmark's state vector
+    expected_obs = self.mu[next_state]
+    
+    # Assuming V is index 4 and E is index 5 in your dataset's observation vector
+    V = expected_obs[4]
+    E = expected_obs[5]
+    
+    reward = (-10.0 * V) + (10.0 * E)
+    return reward

@@ -6,3 +6,8 @@ __pycache__/
 .venv/
 .venv/lib/
 paper/
+venv/
+.cache/
+cache
+mlruns/
+res/
