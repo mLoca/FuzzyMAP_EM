@@ -213,16 +213,21 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         ),
     ]
 
-    print("Evaluating Fuzzy-MAP EM Model...")
-    print("Evaluating Standard EM Model in REALITY...")
-    std_results = Parallel(n_jobs=-1)(
-        delayed(evaluate_cross_environment)(true_env, std_policy, initial_belief, episode = ep) 
-        for ep in range(100) # 100 episodes
+    print("Evaluating Standard and Fuzzy-MAP EM Models in REALITY in parallel...")
+    
+    jobs = []
+    for ep in range(100):  # 100 episodes
+        jobs.append((std_policy, ep))
+        jobs.append((fuzzy_policy, ep))
+
+    all_results = Parallel(n_jobs=-1)(
+        delayed(evaluate_cross_environment)(true_env, pol, initial_belief, episode=ep) 
+        for pol, ep in jobs
     )
-    fuzzy_results = Parallel(n_jobs=-1)(
-        delayed(evaluate_cross_environment)(true_env, fuzzy_policy, initial_belief, episode = ep) 
-        for ep in range(100) # 100 episodes
-    )
+    
+    # joblib.Parallel preserves the input order
+    std_results = all_results[0::2]
+    fuzzy_results = all_results[1::2]
     
     std_returns = [r[0] for r in std_results]
     std_states = [r[1] for r in std_results]
