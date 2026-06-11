@@ -60,15 +60,22 @@ class TrueHIVEnvironment(Environment):
     # OBSERVATION & REWARD MAPPING
     # ---------------------------------------------------------
     def sample_observation(self, next_state, action):
-        # Extract the continuous 6D state
-        arrival_state = next_state
+        # We must return the standardized log observation to match the POMDP's training data.
+        # The AI expects observations in standard normal form, not raw cell counts.
+        mask = [True, True, False, False, True, True]
+        empirical_mean = np.array([5.41947795, 1.59751311, 3.03701108, 1.45943164, 3.7256933, 1.73064582])
+        empirical_std = np.array([0.1913442, 0.86731865, 1.19517352, 0.48159324, 1.16411527, 0.20234819])
         
-        T1 = arrival_state[0]
-        T2 = arrival_state[1]
-        V  = arrival_state[4]
-        E  = arrival_state[5]
-
-        return np.array([T1, T2, V, E], dtype=float)
+        # Safely compute log10 of the physical state
+        log_state = np.log10(np.clip(next_state, 1e-10, None))
+        
+        # Standardize using the same scalars as HIVSimulator
+        standardized_obs = (log_state[mask] - empirical_mean[mask]) / empirical_std[mask]
+        
+        # Emulate clinical noise (matches training set args.noise = 0.1)
+        obs = standardized_obs + np.random.normal(0, 0.1, size=standardized_obs.shape)
+        
+        return tuple(obs)
 
     def reward(self, state, action, next_state= 0):
         self.sim.logspace = False

@@ -254,6 +254,10 @@ def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewar
     std_rewards_padded = pad_arrays(std_rewards)
     fuzzy_rewards_padded = pad_arrays(fuzzy_rewards)
     
+    # Convert states to log10 space to match the simulator's logspace setting
+    std_states_padded = np.log10(np.clip(std_states_padded, 1e-10, None))
+    fuzzy_states_padded = np.log10(np.clip(fuzzy_states_padded, 1e-10, None))
+    
     import os
     if not os.path.exists('res'):
         os.makedirs('res')
@@ -283,7 +287,7 @@ def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewar
         
         axes[i].set_title(state_labels[i])
         axes[i].set_xlabel('Time Steps')
-        axes[i].set_ylabel('Cell Count / Virus Load')
+        axes[i].set_ylabel('Log10(Cell Count / Virus Load)')
         if i == 0:
             axes[i].legend()
             
