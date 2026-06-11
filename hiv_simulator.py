@@ -125,16 +125,17 @@ class HIVSimulator(object):
         eps1, eps2 = self.eps_values_for_actions[action]
         if state is None:
             state = self._get_ob()
-        else:  # recover from the standardlized state
+        elif getattr(self, '_skip_unstandardize', False) == False:  # recover from the standardlized state
             state = state * self.empirical_std[self.mask] + self.empirical_mean[self.mask]
+            
         if self.pomdp:
             if self.logspace:
-                _, _, V, E = 10 ** state
+                _, _, V, E = 10 ** np.clip(state, a_min=None, a_max=300)
             else:
                 _, _, V, E = state
         else:
             if self.logspace:
-                _, _, _, _, V, E = 10 ** state
+                _, _, _, _, V, E = 10 ** np.clip(state, a_min=None, a_max=300)
             else:
                 _, _, _, _, V, E = state
         # the reward function penalizes treatment because of side-effects

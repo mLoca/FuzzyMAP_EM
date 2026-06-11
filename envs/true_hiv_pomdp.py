@@ -80,9 +80,11 @@ class TrueHIVEnvironment(Environment):
         return tuple(obs)
 
     def reward(self, state, action, next_state= 0):
-        #self.sim.logspace = False
+        self.sim.logspace = False
+        self.sim._skip_unstandardize = True
         reward =  self.sim.calc_reward(action=action, state= next_state)
         self.sim.logspace = True
+        self.sim._skip_unstandardize = False
         return reward
 
     def is_terminal(self, state):
