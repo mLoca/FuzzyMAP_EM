@@ -4,6 +4,7 @@ import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
+import random
 from fuzzy.hiv_fuzzy import HIVExpert5DModel
 
 # Import the custom simulator instead of whynot
@@ -13,6 +14,7 @@ from utils.utils import my_hiv_reward_fn
 # Import your existing models and metrics
 from models.trainable.pomdp_EM import PomdpEM as POMDP_EM
 from models.trainable.fuzzy_EM import FuzzyPOMDP as FuzzyMAP_EM
+from models.trainable.vb_pomdp import VariationalBayesianPOMDP as VB_POMDP
 from utils.metrics import compute_avg_l1_error, compute_log_likelihood
 from pathlib import Path
 
@@ -36,6 +38,7 @@ from POMDPPlanners.utils.belief_factory import create_environment_belief
 from POMDPPlanners.simulations.simulation_apis.local_simulations_api import LocalSimulationsAPI
 from POMDPPlanners.core.simulation import EnvironmentRunParams
 from POMDPPlanners.utils.logger import get_logger
+
 
 POMDPPLANNERS_AVAILABLE = True
 #except ImportError:
@@ -84,6 +87,8 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
     # 1. The Body: Initialize true biological reality (6D array)
     seed =42 * episode
     np.random.seed(seed)
+    import random
+    random.seed(seed)
     true_state = true_env.initial_state_dist().sample()[0]
     
     # 2. The Brain: Initialize the AI's mental state (over states 0, 1, 2)
@@ -321,31 +326,46 @@ class HIVDatasetGenerator:
         self.is_pomdp = is_pomdp
         self.max_steps = max_steps
         self.noise_std = noise_std
+        self.seed = seed
         self.env = HIVSimulator(podmp=self.is_pomdp, logspace=True)
         self.env.seed(seed)
         np.random.seed(seed)
+        import random
+        random.seed(seed)
+
+    def _generate_single_patient(self, patient_seed):
+        # Create a fresh thread-safe simulator for each patient
+        env = HIVSimulator(podmp=self.is_pomdp, logspace=True)
+        env.seed(patient_seed)
+        np.random.seed(patient_seed)
+        import random
+        random.seed(patient_seed)
+        
+        true_state = env.reset(perturb_params=True)
+        patient_obs, patient_acts = [], []
+
+        for step in range(self.max_steps):
+            noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
+            patient_obs.append(noisy_obs)
+            action = np.random.randint(0, env.num_actions)
+            patient_acts.append(int(action))
+            true_state, reward, is_terminal, info = env.step(action)
+            if is_terminal: break
+        
+        final_noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
+        patient_obs.append(final_noisy_obs)
+
+        return patient_obs, patient_acts
 
     def generate(self, n_patients):
-        all_observations = []
-        all_actions = []
-
-        for _ in range(n_patients):
-            true_state = self.env.reset(perturb_params=True)
-            patient_obs, patient_acts = [], []
-
-            for step in range(self.max_steps):
-                noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
-                patient_obs.append(noisy_obs)
-                action = np.random.randint(0, self.env.num_actions)
-                patient_acts.append(int(action))
-                true_state, reward, is_terminal, info = self.env.step(action)
-                if is_terminal: break
-            
-            final_noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
-            patient_obs.append(final_noisy_obs)
-
-            all_observations.append(patient_obs)
-            all_actions.append(patient_acts)
+        print(f"Generating {n_patients} patient trajectories in parallel...")
+        results = Parallel(n_jobs=-1)(
+            delayed(self._generate_single_patient)(self.seed + i)
+            for i in range(n_patients)
+        )
+        
+        all_observations = [res[0] for res in results]
+        all_actions = [res[1] for res in results]
 
         return all_observations, all_actions
 
@@ -369,7 +389,7 @@ def run_hiv_benchmark_with_ci(args):
             observations = train_obs[:n_train]
             actions = train_acts[:n_train]
             
-            em_model = POMDP_EM(n_states=args.n_states, n_actions=args.n_actions, obs_dim=args.n_obs_dim)
+            em_model = POMDP_EM(n_states=args.n_states, n_actions=args.n_actions, obs_dim=args.n_obs_dim, parallel=True)
             hiv_var_mapping = {"T1": 0, "T2": 1, "V":  2, "E":  3} 
             
             fuzzy_model = FuzzyMAP_EM(
