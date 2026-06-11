@@ -61,10 +61,19 @@ class LearnedHIVEnvironment(Environment):
 
         eps1, eps2 = eps_values_for_actions[action]
 
-        V = expected_obs[2]
-        E = expected_obs[3]
+        # expected_obs is log10 AND standardized.e.
+        mean_V = 3.7256933
+        std_V = 1.16411527
+        mean_E = 1.73064582
+        std_E = 0.20234819
+
+        log_V = expected_obs[2] * std_V + mean_V
+        log_E = expected_obs[3] * std_E + mean_E
         
-        reward = (-0.1 * 10 ** V) - 2e4 * eps1 ** 2 - 2e3 * eps2 ** 2 + (1e3 * 10 **E )
+        V = 10 ** log_V
+        E = 10 ** log_E
+        
+        reward = (-0.1 * V) - 2e4 * eps1 ** 2 - 2e3 * eps2 ** 2 + (1e3 * E)
         return reward
 
     def is_terminal(self, state):
