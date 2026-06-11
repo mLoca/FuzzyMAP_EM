@@ -7,6 +7,7 @@ from sklearn.cluster import KMeans
 
 from sklearn.mixture import GaussianMixture
 import multiprocessing as mp
+from joblib import Parallel, delayed
 
 
 #TODO: add a parameter for the regularization of the covariance matrices
@@ -176,13 +177,11 @@ class PomdpEM:
         return gammas, xis, total_ll
 
     def expectation_step_parallel(self, observations, actions):
-        """Parallelized E-step using multi-processing"""
-        ctx = mp.get_context('spawn')
-        with ctx.Pool(processes=min(mp.cpu_count(), 8)) as pool:
-            results = pool.starmap(
-                self._process_single_sequence,
-                [(np.array(obs_seq), np.array(act_seq)) for obs_seq, act_seq in zip(observations, actions)]
-            )
+        """Parallelized E-step using joblib"""
+        results = Parallel(n_jobs=-1)(
+            delayed(self._process_single_sequence)(np.array(obs_seq), np.array(act_seq))
+            for obs_seq, act_seq in zip(observations, actions)
+        )
 
         # Unpack results
         gammas, xis, seq_lls = zip(*results)
