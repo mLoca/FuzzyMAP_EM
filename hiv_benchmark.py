@@ -14,7 +14,6 @@ from utils.utils import my_hiv_reward_fn
 # Import your existing models and metrics
 from models.trainable.pomdp_EM import PomdpEM as POMDP_EM
 from models.trainable.fuzzy_EM import FuzzyPOMDP as FuzzyMAP_EM
-from models.trainable.vb_pomdp import VariationalBayesianPOMDP as VB_POMDP
 from utils.metrics import compute_avg_l1_error, compute_log_likelihood
 from pathlib import Path
 
@@ -156,14 +155,14 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     # 2. Configure the planners
     # Note: You need to tune these hyperparameters based on your HIV benchmark
     planner_config = {
-        "n_simulations":100,
-        "depth": 50,
+        "n_simulations":1000,
+        "depth": 30,
         "discount_factor": 0.95,
-        "exploration_constant": 1.0,
-        "k_o": 10,
+        "exploration_constant": 50000.0,
+        "k_o": 2,
         "k_a": 4,
-        "alpha_o": 0.01,
-        "alpha_a": 0.01,
+        "alpha_o": 0.5,
+        "alpha_a": 0.0,
     }
 
     # Swap POMCP for PFT_DPW
@@ -213,10 +212,10 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         ),
     ]
 
-    print("Evaluating Standard and Fuzzy-MAP EM Models in REALITY in parallel...")
+    print("Evaluating Standard and Fuzzy-MAP EM Models")
     
     jobs = []
-    for ep in range(100):  # 100 episodes
+    for ep in range(10):  # 100 episodes
         jobs.append((std_policy, ep))
         jobs.append((fuzzy_policy, ep))
 
