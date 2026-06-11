@@ -306,19 +306,22 @@ class FuzzyPOMDP(PomdpEM):
 
         for i in range(n_observations):
             obs_np = np.array(observations[i])
-            actions_np = np.array(actions[i])
+            gamma_i = gammas[i]
+            acts_i = np.array(actions[i])
+            xi_i = xis[i]
+            T_minus_1 = xi_i.shape[0]
+
             for a in range(self.n_actions):
+                a_mask = (acts_i[:T_minus_1] == a)
+                if np.any(a_mask):
+                    emp_N_T[:, a, :] += np.sum(xi_i[a_mask], axis=0)
+                    emp_den_T[:, a] += np.sum(gamma_i[:T_minus_1][a_mask], axis=0)
 
-                t_indices = np.where(actions_np[:-1] == a)[0]
-                if len(t_indices) > 0:
-                    emp_N_T[:, a, :] += np.sum(xis[i][a], axis=0)
-                    emp_den_T[:, a] += np.sum(xis[i][a], axis=(0, 1))
-
+            emp_N_O += np.sum(gamma_i, axis=0)
+            emp_Sum_O += gamma_i.T @ obs_np
+            
             for s in range(self.n_states):
-                gamma_s = gammas[i][:, s]
-                emp_N_O[s] += np.sum(gamma_s)
-                emp_Sum_O[s] += gamma_s @ obs_np
-                emp_Sum_sq_O[s] += (obs_np.T * gamma_s) @ obs_np
+                emp_Sum_sq_O[s] += np.einsum('t,ti,tj->ij', gamma_i[:, s], obs_np, obs_np)
 
         if self.use_fuzzy:
             fuzzy_N_T, fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O = self._compute_fuzzy_pseudo_counts()

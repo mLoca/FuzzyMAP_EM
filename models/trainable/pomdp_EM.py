@@ -200,22 +200,25 @@ class PomdpEM:
         self.initial_prob /= n_sequences
 
         # Update transition probabilities
+        numerator = np.zeros((self.n_states, self.n_actions, self.n_states))
+        denominator = np.zeros((self.n_states, self.n_actions))
+
+        for i in range(n_sequences):
+            xi_i = xis[i]
+            gamma_i = gammas[i]
+            acts_i = np.array(actions[i])
+            T_minus_1 = xi_i.shape[0]
+            
+            for a in range(self.n_actions):
+                a_mask = (acts_i[:T_minus_1] == a)
+                if np.any(a_mask):
+                    numerator[:, a, :] += np.sum(xi_i[a_mask], axis=0)
+                    denominator[:, a] += np.sum(gamma_i[:T_minus_1][a_mask], axis=0)
+
         for s in range(self.n_states):
             for a in range(self.n_actions):
-                numerator = np.zeros(self.n_states)
-                denominator = 0.0
-
-                for i in range(n_sequences):
-                    for t in range(len(actions[i]) - 1):
-                        if actions[i][t] == a:
-                            # Add counts for state-action transitions
-                            for s_prime in range(self.n_states):
-                                numerator[s_prime] += xis[i][t, s, s_prime]
-                            denominator += gammas[i][t, s]
-
-                # Update transition probabilities if we have observations
-                if denominator > 0:
-                    self.transitions[s, a, :] = numerator / denominator
+                if denominator[s, a] > 0:
+                    self.transitions[s, a, :] = numerator[s, a, :] / denominator[s, a]
 
         # Update observation model parameters
         obs_counts = np.zeros(self.n_states)
@@ -223,12 +226,14 @@ class PomdpEM:
         data_O_sum_gamma_obs_sq = np.zeros((self.n_states, self.obs_dim, self.obs_dim))
 
         for i in range(n_sequences):
-            for t in range(len(observations[i])):
-                obs = observations[i][t]
-                for s in range(self.n_states):
-                    obs_counts[s] += gammas[i][t, s]
-                    new_means[s] += gammas[i][t, s] * obs
-                    data_O_sum_gamma_obs_sq[s] += gammas[i][t, s] * np.outer(obs, obs)
+            obs_i = np.array(observations[i])
+            gamma_i = gammas[i]
+            
+            obs_counts += np.sum(gamma_i, axis=0)
+            new_means += gamma_i.T @ obs_i
+            
+            for s in range(self.n_states):
+                data_O_sum_gamma_obs_sq[s] += np.einsum('t,ti,tj->ij', gamma_i[:, s], obs_i, obs_i)
 
         # Update means and covariances
         for s in range(self.n_states):
