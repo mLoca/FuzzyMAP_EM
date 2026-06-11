@@ -93,6 +93,9 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
     
     total_reward = 0.0
     
+    states_history = [true_state]
+    rewards_history = []
+    
     for step in range(max_steps):
         try:
             action = policy.plan(belief)
@@ -108,6 +111,9 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
         reward = true_env.reward(true_state, action, next_true_state)
         total_reward += reward
         
+        states_history.append(next_true_state)
+        rewards_history.append(reward)
+        
         if true_env.is_terminal(next_true_state):
             break
             
@@ -117,7 +123,7 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
         # Move time forward
         true_state = next_true_state
         
-    return total_reward
+    return total_reward, np.array(states_history), np.array(rewards_history)
 
 def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50, horizon=15):
     std_params = {
@@ -148,7 +154,7 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         "n_simulations":100,
         "depth": 50,
         "discount_factor": 0.95,
-        "exploration_constant": 10.0,
+        "exploration_constant": 1.0,
         "k_o": 10,
         "k_a": 4,
         "alpha_o": 0.01,
@@ -204,38 +210,104 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
 
     print("Evaluating Fuzzy-MAP EM Model...")
     print("Evaluating Standard EM Model in REALITY...")
-    std_returns = Parallel(n_jobs=-1)(
+    std_results = Parallel(n_jobs=-1)(
         delayed(evaluate_cross_environment)(true_env, std_policy, initial_belief, episode = ep) 
         for ep in range(100) # 100 episodes
     )
-    fuzzy_returns = Parallel(n_jobs=-1)(
+    fuzzy_results = Parallel(n_jobs=-1)(
         delayed(evaluate_cross_environment)(true_env, fuzzy_policy, initial_belief, episode = ep) 
         for ep in range(100) # 100 episodes
     )
+    
+    std_returns = [r[0] for r in std_results]
+    std_states = [r[1] for r in std_results]
+    std_rewards = [r[2] for r in std_results]
+
+    fuzzy_returns = [r[0] for r in fuzzy_results]
+    fuzzy_states = [r[1] for r in fuzzy_results]
+    fuzzy_rewards = [r[2] for r in fuzzy_results]
 
     print("\n Performance Results:")
     print(f"Standard: {np.mean(std_returns)}.    Fuzzy:{np.mean(fuzzy_returns)}")
     print(f"Standard 95% CI: [{scipy.stats.norm.interval(0.95, loc=np.mean(std_returns), scale=scipy.stats.sem(std_returns))}]")
     print(f"Fuzzy 95% CI: [{scipy.stats.norm.interval(0.95, loc=np.mean(fuzzy_returns), scale=scipy.stats.sem(fuzzy_returns))}]")
-    #results, statistics_df  = api.run_multiple_environments_and_policies(
-    #    environment_run_params=environment_run_params,
-    #    alpha=0.1,
-    #    confidence_interval_level=0.95,
-    #    experiment_name="Fuzzy_MAP_EM_Evaluation",
-    #    n_jobs=-1,
-    #    clear_cache_on_start=True
-    #)
-#
-#
-    ## Display results
-    #print("\\nPERFORMANCE RESULTS:")
-    #for env_name in statistics_df['environment'].unique():
-    #    env_results = statistics_df[statistics_df['environment'] == env_name]
-    #    print(f"\\n{env_name}:")
-    #    for _, row in env_results.iterrows():
-    #        print(f"  {row['policy']}: {row['average_return']:.3f} [{row['average_return_ci_lower']:.3f}, {row['average_return_ci_upper']:.3f}]")
-#
-    #print("\\nStudy complete! Check './planners_comparison_results' for detailed logs.")
+
+    plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewards)
+
+def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewards, save_path='res/patient_trajectories.png'):
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    def pad_arrays(arrays):
+        max_len = max(len(arr) for arr in arrays)
+        padded = []
+        for arr in arrays:
+            if len(arr) < max_len:
+                pad_width = [(0, max_len - len(arr))] + [(0, 0)] * (arr.ndim - 1)
+                padded.append(np.pad(arr, pad_width, mode='constant', constant_values=np.nan))
+            else:
+                padded.append(arr)
+        return np.array(padded)
+        
+    std_states_padded = pad_arrays(std_states)
+    fuzzy_states_padded = pad_arrays(fuzzy_states)
+    std_rewards_padded = pad_arrays(std_rewards)
+    fuzzy_rewards_padded = pad_arrays(fuzzy_rewards)
+    
+    import os
+    if not os.path.exists('res'):
+        os.makedirs('res')
+
+    # Save the results to an npz file
+    np.savez('res/patient_trajectories.npz', 
+             std_states=std_states_padded, std_rewards=std_rewards_padded,
+             fuzzy_states=fuzzy_states_padded, fuzzy_rewards=fuzzy_rewards_padded)
+    print("Patient trajectories saved to res/patient_trajectories.npz")
+    
+    fig, axes = plt.subplots(4, 2, figsize=(15, 12))
+    axes = axes.flatten()
+    state_labels = ["T1 (Uninfected CD4)", "T2 (Infected CD4)", "T1* (Uninfected Macrophages)", "T2* (Infected Macrophages)", "V (Free Virus)", "E (Immune Response)"]
+    
+    for i in range(6):
+        with np.errstate(all='ignore'):
+            std_mean = np.nanmean(std_states_padded[:, :, i], axis=0)
+            std_std = np.nanstd(std_states_padded[:, :, i], axis=0)
+            fuz_mean = np.nanmean(fuzzy_states_padded[:, :, i], axis=0)
+            fuz_std = np.nanstd(fuzzy_states_padded[:, :, i], axis=0)
+        
+        axes[i].plot(std_mean, label='Standard EM', color='blue')
+        axes[i].fill_between(range(len(std_mean)), std_mean - std_std, std_mean + std_std, alpha=0.2, color='blue')
+        
+        axes[i].plot(fuz_mean, label='Fuzzy-MAP EM', color='orange')
+        axes[i].fill_between(range(len(fuz_mean)), fuz_mean - fuz_std, fuz_mean + fuz_std, alpha=0.2, color='orange')
+        
+        axes[i].set_title(state_labels[i])
+        axes[i].set_xlabel('Time Steps')
+        axes[i].set_ylabel('Cell Count / Virus Load')
+        if i == 0:
+            axes[i].legend()
+            
+    with np.errstate(all='ignore'):
+        std_r_mean = np.nanmean(std_rewards_padded, axis=0)
+        std_r_std = np.nanstd(std_rewards_padded, axis=0)
+        fuz_r_mean = np.nanmean(fuzzy_rewards_padded, axis=0)
+        fuz_r_std = np.nanstd(fuzzy_rewards_padded, axis=0)
+    
+    axes[6].plot(std_r_mean, label='Standard EM', color='blue')
+    axes[6].fill_between(range(len(std_r_mean)), std_r_mean - std_r_std, std_r_mean + std_r_std, alpha=0.2, color='blue')
+    
+    axes[6].plot(fuz_r_mean, label='Fuzzy-MAP EM', color='orange')
+    axes[6].fill_between(range(len(fuz_r_mean)), fuz_r_mean - fuz_r_std, fuz_r_mean + fuz_r_std, alpha=0.2, color='orange')
+    
+    axes[6].set_title("Reward")
+    axes[6].set_xlabel('Time Steps')
+    axes[6].set_ylabel('Reward')
+    
+    axes[7].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    print(f"Patient trajectory plots saved successfully to {save_path}")
 
 # ==============================================================================
 # DATASET GENERATION & BENCHMARK LOOP
@@ -285,7 +357,7 @@ def run_hiv_benchmark_with_ci(args):
     for trial in range(args.n_runs):
         print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
         data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=100, seed=42 + trial)
-        train_obs, train_acts = data_gen.generate(n_patients=150)
+        train_obs, train_acts = data_gen.generate(n_patients=300)
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
         for n_train in args.train_sizes:
@@ -382,14 +454,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
     parser.add_argument("--n_runs", type=int, default=1, help="Number of independent trials to compute confidence intervals")
     parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
-    parser.add_argument("--n_states", type=int, default=3, help="Discrete latent phases")
+    parser.add_argument("--n_states", type=int, default=2, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=5, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=0.1, help="Observation fuzzy weight")
-    parser.add_argument("--noise", type=float, default=0.001, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[5, 10, 25])
+    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=0.25, help="Observation fuzzy weight")
+    parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[300])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
