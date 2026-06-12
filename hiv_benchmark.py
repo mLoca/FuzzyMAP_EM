@@ -37,6 +37,7 @@ from POMDPPlanners.utils.belief_factory import create_environment_belief
 from POMDPPlanners.simulations.simulation_apis.local_simulations_api import LocalSimulationsAPI
 from POMDPPlanners.core.simulation import EnvironmentRunParams
 from POMDPPlanners.utils.logger import get_logger
+from models.trainable.variational_HMM import VariationalIOHMM
 
 
 POMDPPLANNERS_AVAILABLE = True
@@ -376,11 +377,13 @@ class HIVDatasetGenerator:
 
 def run_hiv_benchmark_with_ci(args):
     results = {
-        'EM_L1': {s: [] for s in args.train_sizes},
-        'Fuzzy_L1': {s: [] for s in args.train_sizes},
-        'EM_LL': {s: [] for s in args.train_sizes},
-        'Fuzzy_LL': {s: [] for s in args.train_sizes}
-    }
+            'EM_L1': {s: [] for s in args.train_sizes},
+            'Fuzzy_L1': {s: [] for s in args.train_sizes},
+            'Pyro_L1': {s: [] for s in args.train_sizes},
+            'EM_LL': {s: [] for s in args.train_sizes},
+            'Fuzzy_LL': {s: [] for s in args.train_sizes},
+            'Pyro_LL': {s: [] for s in args.train_sizes}
+        }
 
     for trial in range(args.n_runs):
         print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
@@ -411,6 +414,8 @@ def run_hiv_benchmark_with_ci(args):
                 parallel=False,
             )
 
+            pyro_model = VariationalIOHMM(args.n_states, args.n_actions, args.n_obs_dim)
+
             em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
             em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
@@ -421,10 +426,17 @@ def run_hiv_benchmark_with_ci(args):
             fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)       
             print(f"Fuzzy-MAP EM  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
 
+            pyro_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
+            pyro_l1 = compute_avg_l1_error(pyro_model, test_obs, test_acts)
+            pyro_ll = compute_log_likelihood(pyro_model, test_obs, test_acts)       
+            print(f"Variational HMM -> L1: {pyro_l1:.3f} | Test LL: {pyro_ll:.3f}")
+
             results['EM_L1'][n_train].append(em_l1)
             results['Fuzzy_L1'][n_train].append(fuzzy_l1)
             results['EM_LL'][n_train].append(em_ll)
             results['Fuzzy_LL'][n_train].append(fuzzy_ll)
+            results['Pyro_L1'][n_train].append(pyro_l1)
+            results['Pyro_LL'][n_train].append(pyro_ll)
             
             # --- RUN PLANNING EVALUATION VIA LOCAL_SIMULATION_API ---
             if True:
@@ -489,7 +501,7 @@ if __name__ == "__main__":
     parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
     parser.add_argument("--lambda_o", type=float, default=0.25, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[300])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[30])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
