@@ -75,17 +75,16 @@ class TrueHIVEnvironment(Environment):
         standardized_obs = (log_state[mask] - empirical_mean[mask]) / empirical_std[mask]
         
         # Emulate clinical noise (matches training set args.noise = 0.1)
-        obs = standardized_obs + np.random.normal(0, 0.1, size=standardized_obs.shape)
+        obs = standardized_obs + np.random.normal(0, 0.001, size=standardized_obs.shape)
         
         return tuple(obs)
 
     def reward(self, state, action, next_state= 0):
-        self.sim.logspace = False
+
         self.sim._skip_unstandardize = True
-        reward =  self.sim.calc_reward(action=action, state= next_state)
-        self.sim.logspace = True
+        reward =  self.sim.calc_reward(action=action, state= state)
         self.sim._skip_unstandardize = False
-        return reward
+        return (-1*reward)
 
     def is_terminal(self, state):
         return False

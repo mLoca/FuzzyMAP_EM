@@ -74,7 +74,7 @@ class LearnedHIVEnvironment(Environment):
         E = 10 ** log_E
         
         reward = (-0.1 * V) - 2e4 * eps1 ** 2 - 2e3 * eps2 ** 2 + (1e3 * E)
-        return reward
+        return (-1* reward)
 
     def is_terminal(self, state):
         # Define termination conditions for the HIV benchmark

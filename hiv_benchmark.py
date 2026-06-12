@@ -425,17 +425,11 @@ def run_hiv_benchmark_with_ci(args):
             fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)       
             print(f"Fuzzy-MAP EM  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
 
-            pyro_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
-            pyro_l1 = compute_avg_l1_error(pyro_model, test_obs, test_acts)
-            pyro_ll = compute_log_likelihood(pyro_model, test_obs, test_acts)       
-            print(f"Variational HMM -> L1: {pyro_l1:.3f} | Test LL: {pyro_ll:.3f}")
 
             results['EM_L1'][n_train].append(em_l1)
             results['Fuzzy_L1'][n_train].append(fuzzy_l1)
             results['EM_LL'][n_train].append(em_ll)
             results['Fuzzy_LL'][n_train].append(fuzzy_ll)
-            results['Pyro_L1'][n_train].append(pyro_l1)
-            results['Pyro_LL'][n_train].append(pyro_ll)
             
             # --- RUN PLANNING EVALUATION VIA LOCAL_SIMULATION_API ---
             if True:
@@ -497,10 +491,10 @@ if __name__ == "__main__":
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=0.25, help="Observation fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=50, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=5.25, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[30])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
