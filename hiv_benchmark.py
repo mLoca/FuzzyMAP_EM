@@ -87,7 +87,6 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
     # 1. The Body: Initialize true biological reality (6D array)
     seed =42 * episode
     np.random.seed(seed)
-    import random
     random.seed(seed)
     true_state = true_env.initial_state_dist().sample()[0]
     
