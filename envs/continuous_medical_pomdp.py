@@ -58,8 +58,8 @@ class ContinuousObservationModel(ObservationModel):
     def __init__(self, states, actions, obs_params=None, distribution="beta", *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.states = [State(s) for s in states]
-        self.actions = [MedAction(a) for a in actions]
+        self.states = [State(s) if isinstance(s, str) else s for s in states]
+        self.actions = [MedAction(a) if isinstance(a, str) else a for a in actions]
 
         if distribution not in self._DIST_MAP:
             raise ValueError(f"Unsupported distribution type: {distribution}. "

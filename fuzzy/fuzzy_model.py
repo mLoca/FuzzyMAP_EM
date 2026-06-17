@@ -104,12 +104,12 @@ def build_fuzzymodel(pomdp=None, seed=42, trails=300, noise=0):
 
     nr_clus = 5
     df = collect_data(trials=trails, horizon=3, pomdp=pomdp, target_per_state=220, noise=noise, state_in_df=False)
-    df["action"] = df["action"].astype("category")
+    #df["action"] = df["action"].astype("category")
 
     # df to excel
     df_test = df[["test", "symptoms", "action", "next_test"]]
     FIS = pyFUME(dataframe=df_test, nr_clus=nr_clus,
-                 variable_names=['test', 'symptoms', 'action', 'next_test'],
+                 variable_names=["test", "symptoms", "action", "next_test"],
                  verbose=False)
     model = []
 

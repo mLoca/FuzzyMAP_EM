@@ -113,7 +113,7 @@ class MedicalTransitionModel(pomdp_py.TransitionModel):
         else:
             self.transitions = transition
 
-        self.states = [State(s) for s in states]
+        self.states = [State(s) if isinstance(s, str) else s for s in states]
 
     def probability(self, next_state, state, action):
         return self.transitions.get((action.name, state.name, next_state.name), 0.0)
