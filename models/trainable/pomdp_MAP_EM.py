@@ -57,8 +57,8 @@ class PomdpMAPEM(PomdpEM):
 
                 t_indices = np.where(actions_np[:-1] == a)[0]
                 if len(t_indices) > 0:
-                    emp_N_T[:, a, :] += np.sum(xis[i][a], axis=0)
-                    emp_den_T[:, a] += np.sum(xis[i][a], axis=(0, 1))
+                    emp_N_T[:, a, :] += np.sum(xis[i][t_indices], axis=0)
+                    emp_den_T[:, a] += np.sum(xis[i][t_indices], axis=(0, 1))
 
             for s in range(self.n_states):
                 gamma_s = gammas[i][:, s]

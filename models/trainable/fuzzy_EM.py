@@ -289,7 +289,7 @@ class FuzzyPOMDP(PomdpEM):
                     pseudo_count_O_mean[s_prime, :] += strength * crisp_pred
                     pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 1.0)
                     
-                    pseudo_count_T[s, a, s_prime] += overall_match_score * raw_pdfs[s_prime]
+                    pseudo_count_T[s, a, s_prime] += overall_match_score * normalized_pdfs[s_prime]
 
         return pseudo_count_T, pseudo_count_O_den, pseudo_count_O_mean, pseudo_count_O_cov
 
