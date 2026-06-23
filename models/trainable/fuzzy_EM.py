@@ -118,17 +118,30 @@ class FuzzyPOMDP(PomdpEM):
             if variable in self.obs_var_index:
                 idx = self.obs_var_index[variable]
                 vals = points[:, idx].copy()
-                
-                if variable in self.fuzzy_model._variables:
-                    uod = self.fuzzy_model._variables[variable]._universe_of_discourse
-                    if uod is not None:
-                        vals = np.clip(vals, uod[0] + 0.01, uod[1] - 0.01)
 
                 membership_degree = np.array([fuzzy_set.get_value(v) for v in vals])
-            elif action is not None:
+            elif action is not None and variable.lower() == 'action':
                 membership_degree = fuzzy_set.get_value(action)
             else:
-                raise ValueError(f"Variable {variable} not recognized in rule matching.")
+                inferred_vals = []
+                for p in points:
+                    for v_name, v_idx in self.obs_var_index.items():
+                        v_val = p[v_idx]
+                        self.fuzzy_model.set_variable(v_name, v_val)
+                    if action is not None:
+                        self.fuzzy_model.set_variable("Action", action)
+                        self.fuzzy_model.set_variable("action", action)
+                    
+                    try:
+                        res = self.fuzzy_model.Sugeno_inference([variable])
+                        inferred_vals.append(res.get(variable, 0.0))
+                    except Exception:
+                        try:
+                            res = self.fuzzy_model.inference([variable])
+                            inferred_vals.append(res.get(variable, 0.0))
+                        except Exception:
+                            raise ValueError(f"Variable {variable} not recognized and could not be inferred.")
+                membership_degree = np.array([fuzzy_set.get_value(v) for v in inferred_vals])
 
             # update the match scores depending on AND/OR
             if isAnd:
@@ -169,6 +182,10 @@ class FuzzyPOMDP(PomdpEM):
         variable, term = consequent.split("IS")
         variable = variable.strip()
         term = term.strip()
+        
+        if variable not in self.obs_var_index:
+            return 0.0, variable
+            
         mapping_value = self.obs_var_index[variable]
 
         # Get the fuzzy set for the variable and term
@@ -194,14 +211,29 @@ class FuzzyPOMDP(PomdpEM):
                 if var in fun:
                     idx = self.obs_var_index[var]
                     val = self.obs_means[state][idx]
-                    if var in self.fuzzy_model._variables:
-                        uod = self.fuzzy_model._variables[var]._universe_of_discourse
-                        if uod is not None:
-                            val = np.clip(val, uod[0] + 0.01, uod[1] - 0.01)
                     fun = fun.replace(var, str(val))
 
             if 'action' in fun:
                 fun = fun.replace('action', str(action))
+                
+            for var in self.fuzzy_model._variables.keys():
+                if var not in self.obs_var_index and var.lower() != 'action' and var in fun:
+                    for v_name, v_idx in self.obs_var_index.items():
+                        v_val = self.obs_means[state][v_idx]
+                        self.fuzzy_model.set_variable(v_name, v_val)
+                    if action is not None:
+                        self.fuzzy_model.set_variable("Action", action)
+                        self.fuzzy_model.set_variable("action", action)
+                    try:
+                        res = self.fuzzy_model.Sugeno_inference([var])
+                        val = res.get(var, 0.0)
+                    except Exception:
+                        try:
+                            res = self.fuzzy_model.inference([var])
+                            val = res.get(var, 0.0)
+                        except Exception:
+                            val = 0.0
+                    fun = fun.replace(var, str(val))
 
             o_rule_pred = eval(fun)
             return o_rule_pred, term
@@ -287,9 +319,9 @@ class FuzzyPOMDP(PomdpEM):
                     
                     pseudo_count_O_den[s_prime] += strength
                     pseudo_count_O_mean[s_prime, :] += strength * crisp_pred
-                    pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 1.0)
+                    pseudo_count_O_cov[s_prime, :, :] += strength * np.outer(crisp_pred, crisp_pred)
                     
-                    pseudo_count_T[s, a, s_prime] += overall_match_score * normalized_pdfs[s_prime]
+                    pseudo_count_T[s, a, s_prime] += overall_match_score * raw_pdfs[s_prime]
 
         return pseudo_count_T, pseudo_count_O_den, pseudo_count_O_mean, pseudo_count_O_cov
 

@@ -10,19 +10,22 @@ import numpy as np
 import yaml
 import itertools
 import copy
+import pomdp_py
 from pomdp_py import Agent, Environment
 
-from envs.hybrid_light_dark_env import overwrite_config
-from fuzzy.lightdark_fuzzy import build_lightdark_fuzzymodel
+def overwrite_config(base, update):
+    for k, v in update.items():
+        if isinstance(v, dict) and k in base:
+            overwrite_config(base[k], v)
+        else:
+            base[k] = v
+
+
 import utils.utils as utils
 from envs.continuous_medical_pomdp import ContinuousObservationModel
 from models.trainable.fuzzy_static_EM import FuzzyStaticPOMDP
-from POMDPPlanners.environments import DiscreteLightDarkPOMDP
-from POMDPPlanners.environments.light_dark_pomdp.discrete_light_dark_pomdp import ObservationModelType
-from POMDPPlanners.environments.light_dark_pomdp.continuous_light_dark_pomdp import (
-    ContinuousLightDarkPOMDPDiscreteActions, RewardModelType
-)
-from envs.hybrid_light_dark_env import LDState, LDTransitionModel, LDObservationModel, LDRewardModel, LDPolicyModel
+
+
 
 from models.trainable.pomdp_EM import PomdpEM
 from models.trainable.pomdp_MAP_EM import PomdpMAPEM
@@ -363,6 +366,7 @@ def _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model, seed, s
         model = _instantiate_model_from_config(model_config, env, fuzzy_model, seed)
         start_time = time.time()
 
+        model.initialize_with_kmeans(obs)
         fit_ll = model.fit(
             obs, acts,
             max_iterations=standard_param.get("n_iterations", 100),

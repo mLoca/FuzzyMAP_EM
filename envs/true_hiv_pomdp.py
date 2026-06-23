@@ -36,7 +36,7 @@ class TrueHIVEnvironment(Environment):
 
     def initial_state_dist(self):
         #np.log10(self.initial_biological_state) to match the logspace state representation in HIVSimulator
-        self.initial_biological_state = np.log10(self.initial_biological_state)
+        #self.initial_biological_state = np.log10(self.initial_biological_state)
         return TrueHIVStateDistribution(self.initial_biological_state)
 
     # ---------------------------------------------------------
@@ -48,8 +48,6 @@ class TrueHIVEnvironment(Environment):
         """
 
         current_state = np.atleast_1d(state).astype(float)     
-        if state.size == 1:
-            current_state = np.copy(self.initial_biological_state)
 
         self.sim.state = np.copy(current_state)
         self.sim.t = 0.0 
@@ -80,11 +78,14 @@ class TrueHIVEnvironment(Environment):
         return tuple(obs)
 
     def reward(self, state, action, next_state= 0):
-
+        if next_state is not None:
+            next_state = np.atleast_1d(state).astype(float)
         self.sim._skip_unstandardize = True
-        reward =  self.sim.calc_reward(action=action, state= state)
+        self.sim.logspace =False
+        reward =  self.sim.calc_reward(action=action, state=next_state)
+        self.sim.logspace =True
         self.sim._skip_unstandardize = False
-        return (-1*reward)
+        return reward
 
     def is_terminal(self, state):
         return False
