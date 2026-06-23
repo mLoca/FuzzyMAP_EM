@@ -5,7 +5,7 @@ import scipy.stats
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 import random
-from fuzzy.hiv_fuzzy import HIVExpert5DModel
+from fuzzy.HIV_fuzzy_v2 import HIVExpertV2Model
 
 # Import the custom simulator instead of whynot
 from hiv_simulator import HIVSimulator
@@ -171,7 +171,8 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
 
     # 3. Setup Initial Beliefs (e.g., Uniform particle belief)
     # You can customize this based on the POMDPPlanners documentation
-    initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
+    std_initial_belief = get_initial_belief(std_env, n_particles=100)
+    fuzzy_initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
 
     # 4. Run the Evaluation
     api = LocalSimulationsAPI()
@@ -205,8 +206,15 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     environment_run_params=[
         EnvironmentRunParams(
             environment=true_env,
-            belief=initial_belief,
-            policies=[std_policy, fuzzy_policy],
+            belief=std_initial_belief,
+            policies=[std_policy],
+            num_episodes=15,
+            num_steps=10
+        ),
+        EnvironmentRunParams(
+            environment=true_env,
+            belief=fuzzy_initial_belief,
+            policies=[fuzzy_policy],
             num_episodes=15,
             num_steps=10
         ),
@@ -216,12 +224,12 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     
     jobs = []
     for ep in range(10):  # 100 episodes
-        jobs.append((std_policy, ep))
-        jobs.append((fuzzy_policy, ep))
+        jobs.append((std_policy, std_initial_belief, ep))
+        jobs.append((fuzzy_policy, fuzzy_initial_belief, ep))
 
     all_results = Parallel(n_jobs=-1)(
-        delayed(evaluate_cross_environment)(true_env, pol, initial_belief, episode=ep) 
-        for pol, ep in jobs
+        delayed(evaluate_cross_environment)(true_env, pol, belief, episode=ep) 
+        for pol, belief, ep in jobs
     )
     
     # joblib.Parallel preserves the input order
@@ -404,7 +412,7 @@ def run_hiv_benchmark_with_ci(args):
                 obs_dim=args.n_obs_dim,  
                 lambda_T=args.lambda_t, 
                 lambda_O=args.lambda_o,
-                fuzzy_model=HIVExpert5DModel().get_model(),
+                fuzzy_model=HIVExpertV2Model().get_model(),
                 hyperparameter_update_method="adaptive",
                 obs_var_index=hiv_var_mapping,
                 alpha_ah=0.1,
@@ -412,9 +420,6 @@ def run_hiv_benchmark_with_ci(args):
                 ensure_psd=True,
                 parallel=False,
             )
-
-            pyro_model = VariationalIOHMM(args.n_states, args.n_actions, args.n_obs_dim)
-
             em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
             em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
@@ -491,10 +496,10 @@ if __name__ == "__main__":
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=50, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=5.25, help="Observation fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=2, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=1, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[10])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
