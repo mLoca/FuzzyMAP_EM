@@ -30,7 +30,8 @@ class FuzzyPOMDP(PomdpEM):
                  warm_start_update=10,
                  alpha_ah=0.05,
                  lambda_min=0.0,
-                 epsilon_prior=1e-4
+                 epsilon_prior=1e-4,
+                 action_mapping=None
                  ):
         super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed,
                          epsilon_prior=epsilon_prior, ensure_psd=ensure_psd)
@@ -75,6 +76,7 @@ class FuzzyPOMDP(PomdpEM):
                 self.fuzzy_model = fuzzy_model
 
         self.obs_var_index = obs_var_index if obs_var_index is not None else {"test_result": 0, "symptoms": 1}
+        self.action_mapping = action_mapping if action_mapping is not None else {}
 
     def _match_rule_ant(self, rule, action, O_means, state=0):
         """
@@ -122,6 +124,9 @@ class FuzzyPOMDP(PomdpEM):
                 membership_degree = np.array([fuzzy_set.get_value(v) for v in vals])
             elif action is not None and variable.lower() == 'action':
                 membership_degree = fuzzy_set.get_value(action)
+            elif action is not None and variable in self.action_mapping.get(action, {}):
+                action_val = self.action_mapping[action][variable]
+                membership_degree = fuzzy_set.get_value(action_val)
             else:
                 inferred_vals = []
                 for p in points:
@@ -131,6 +136,9 @@ class FuzzyPOMDP(PomdpEM):
                     if action is not None:
                         self.fuzzy_model.set_variable("Action", action)
                         self.fuzzy_model.set_variable("action", action)
+                        if action in self.action_mapping:
+                            for k, v in self.action_mapping[action].items():
+                                self.fuzzy_model.set_variable(k, v)
                     
                     try:
                         res = self.fuzzy_model.Sugeno_inference([variable])
@@ -224,6 +232,9 @@ class FuzzyPOMDP(PomdpEM):
                     if action is not None:
                         self.fuzzy_model.set_variable("Action", action)
                         self.fuzzy_model.set_variable("action", action)
+                        if action in self.action_mapping:
+                            for k, v in self.action_mapping[action].items():
+                                self.fuzzy_model.set_variable(k, v)
                     try:
                         res = self.fuzzy_model.Sugeno_inference([var])
                         val = res.get(var, 0.0)

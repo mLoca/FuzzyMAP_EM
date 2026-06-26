@@ -5,7 +5,7 @@ import scipy.stats
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 import random
-from fuzzy.HIV_fuzzy_v2 import HIVExpertV2Model
+from fuzzy.HIV_fuzzy_new import HIVExpertNewModel
 
 # Import the custom simulator instead of whynot
 from hiv_simulator import HIVSimulator
@@ -46,6 +46,13 @@ POMDPPLANNERS_AVAILABLE = True
 #    print("Warning: POMDPPlanners not found. Planning benchmark will be skipped unless installed.")
 from envs.custom_env_to_plan import LearnedHIVEnvironment
 from envs.true_hiv_pomdp import TrueHIVEnvironment
+
+hiv_action_mapping = {
+    0: {'e1': 0.0, 'e2': 0.0},   # None
+    1: {'e1': 0.7, 'e2': 0.0},   # RTI Only
+    2: {'e1': 0.0, 'e2': 0.3},   # PI Only
+    3: {'e1': 0.7, 'e2': 0.3}    # HAART (Both)
+}
 
 class TrueHIVEnvironmentWrapper:
     """ 
@@ -412,7 +419,8 @@ def run_hiv_benchmark_with_ci(args):
                 obs_dim=args.n_obs_dim,  
                 lambda_T=args.lambda_t, 
                 lambda_O=args.lambda_o,
-                fuzzy_model=HIVExpertV2Model().get_model(),
+                fuzzy_model=HIVExpertNewModel().get_model(),
+                action_mapping=hiv_action_mapping,
                 hyperparameter_update_method="adaptive",
                 obs_var_index=hiv_var_mapping,
                 alpha_ah=0.1,
