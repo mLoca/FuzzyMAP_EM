@@ -23,7 +23,6 @@ def overwrite_config(base, update):
 
 import utils.utils as utils
 from envs.continuous_medical_pomdp import ContinuousObservationModel
-from models.trainable.fuzzy_static_EM import FuzzyStaticPOMDP
 
 
 
@@ -107,26 +106,6 @@ class SyntheticEnvironment:
             env = Environment(init_state=State(random.choice(config["states"])),
                             transition_model=transition_model,
                             reward_model=reward_model)
-        else:
-            transition_model = LDTransitionModel(self.states, self.true_transitions)
-            obs_model = LDObservationModel(self.true_observations)
-            reward_model = LDRewardModel()
-            policy_model = LDPolicyModel(self.actions)
-
-            # Uniform belief distribution across all spatial grids
-
-            start_state_name = f"s_{5 * self.grid_size + 0}" # State index 55
-            
-            belief_dict = {LDState(s, 0, 0): 0.0 for s in self.states}
-            belief_dict[LDState(start_state_name, 0, 0)] = 1.0
-            init_belief = pomdp_py.Histogram(belief_dict)   
-
-            agent = Agent(init_belief, policy_model, transition_model, obs_model, reward_model)
-            
-            # Start at standard location: x=0, y=5 (State index 55)
-            start_state_name = f"s_{5 * self.grid_size + 5}"
-            env = Environment(LDState(start_state_name, 0, 5), transition_model, reward_model)
-            return pomdp_py.POMDP(agent, env)
 
         return pomdp_py.POMDP(agent, env)
 
@@ -135,18 +114,12 @@ class SyntheticEnvironment:
         Create a new POMDP instance from an existing one.
         This is useful for resetting the environment.
         """
-        if getattr(self, 'env_type', 'medical') == 'lightdark':
-            start_state_name = f"s_{5 * self.grid_size + 0}"
-            belief_dict = {LDState(s, 0, 0): 0.0 for s in self.states}
-            belief_dict[LDState(start_state_name, 0, 0)] = 1.0
-            
-            init_belief = pomdp_py.Histogram(belief_dict)
-        else:
-            init_belief = pomdp_py.Histogram({
-                State("healthy"): 1 / 3,
-                State("sick"): 1 / 3,
-                State("critical"): 1 / 3
-            })
+
+        init_belief = pomdp_py.Histogram({
+            State("healthy"): 1 / 3,
+            State("sick"): 1 / 3,
+            State("critical"): 1 / 3
+        })
 
         self.pomdp.agent.set_belief(init_belief, prior=True)
         self.pomdp.agent.tree = None
@@ -185,14 +158,6 @@ class LaserTagEnvironmentWrapper:
     def __init__(self, config, distribution_type="mvn"):
         self.config = config
         discount = config.get("discount_factor", 0.95)
-        self.env = DiscreteLightDarkPOMDP(discount_factor=discount, observation_model_type=ObservationModelType.DISTANCE_BASED)
-        self.env_tmp = ContinuousLightDarkPOMDPDiscreteActions(
-                        discount_factor=0.95,
-                        goal_state=np.array([10, 5]),
-                        start_state=np.array([0, 5]),
-                        reward_model_type=RewardModelType.CONSTANT_HAZARD_PENALTY,
-                        obstacles=[]
-                    )
         
         self.n_states = config.get("n_states", 5)
         self.actions = ['up', 'down', 'right', 'left', 'tag']
@@ -310,12 +275,6 @@ def _instantiate_model_from_config(model_config, env, fuzzy_model, seed):
                            **model_params)
     elif model_cls == "PomdpMAPEM":
         model = PomdpMAPEM(**common_args, **model_params)
-    elif model_cls == "FuzzyStaticPOMDP":
-        model = FuzzyStaticPOMDP(**common_args,
-                           fuzzy_model=fuzzy_model,
-                           obs_var_index=obs_index,
-                           ensure_psd=True,
-                           **model_params)
     else:
         raise ValueError(f"Unknown model class: {model_cls}")
 
@@ -429,11 +388,7 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
         
     obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=current_seed)
 
-    if env_type == "lightdark":
-        expert_type = standard_param.get("expert_type", "good") 
-        fuzzy_model = build_lightdark_fuzzymodel(grid_size=env_config.get("grid_size", 11), expert_type=expert_type)
-    else:
-        fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed)
+    fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed)
 
     np.random.seed(current_seed)
     random.seed(current_seed)
@@ -526,7 +481,7 @@ def main():
             for t in tasks:
                 all_batch_results.append(run_dataset_batch(*t))
         else:
-            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 32)) as executor:
+            with ProcessPoolExecutor(max_workers=min(os.cpu_count(), 90)) as executor:
                 futures = [executor.submit(run_dataset_batch, *t) for t in tasks]
                 for future in as_completed(futures):
                     try:

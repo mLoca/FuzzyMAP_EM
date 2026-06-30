@@ -8,32 +8,31 @@ class HIVExpertNewModel:
         self.FS = FuzzySystem(show_banner=False)
         #Define rule list
         RULES = []
-
-        # Define crisp output values (On and Off)
-        self.FS.set_crisp_output_value('Off', 0)
-        self.FS.set_crisp_output_value('On', 1)
-
-        # Variable-specific crisp output values
-        self.FS.set_crisp_output_value('T1_Depleted', -4.805361)
-        self.FS.set_crisp_output_value('T1_Partially_depleted', -2.453578)
-        self.FS.set_crisp_output_value('T1_Abundant', 3.033915)
-
-        self.FS.set_crisp_output_value('T1_inf_Depleted', -4.214460)
-        self.FS.set_crisp_output_value('T1_inf_Partially_depleted', -2.407191)
-        self.FS.set_crisp_output_value('T1_inf_Abundant', 1.809770)
-
-        self.FS.set_crisp_output_value('T2_Low', -2.994877)
-        self.FS.set_crisp_output_value('T2_High', 2.770016)
-
-        self.FS.set_crisp_output_value('T2_inf_Low', -3.030424)
-        self.FS.set_crisp_output_value('T2_inf_High', 5.275341)
-
-        self.FS.set_crisp_output_value('V_Low', -3.200451)
-        self.FS.set_crisp_output_value('V_High', 1.953678)
-
-        self.FS.set_crisp_output_value('E_Low', -3.610834)
-        self.FS.set_crisp_output_value('E_High', 21.099048)
-
+        #Define crisp output values
+        #self.FS.set_crisp_output_value('Off', 0)
+        #self.FS.set_crisp_output_value('On', 1)
+#
+        ## Variable-specific crisp output values
+        #self.FS.set_crisp_output_value('T1_Depleted', -4.805361)
+        #self.FS.set_crisp_output_value('T1_Partially_depleted', -2.453578)
+        #self.FS.set_crisp_output_value('T1_Abundant', 3.033915)
+#
+        #self.FS.set_crisp_output_value('T1_inf_Depleted', -4.214460)
+        #self.FS.set_crisp_output_value('T1_inf_Partially_depleted', -2.407191)
+        #self.FS.set_crisp_output_value('T1_inf_Abundant', 1.809770)
+#
+        #self.FS.set_crisp_output_value('T2_Low', -2.994877)
+        #self.FS.set_crisp_output_value('T2_High', 2.770016)
+#
+        #self.FS.set_crisp_output_value('T2_inf_Low', -3.030424)
+        #self.FS.set_crisp_output_value('T2_inf_High', 5.275341)
+#
+        #self.FS.set_crisp_output_value('V_Low', -3.200451)
+        #self.FS.set_crisp_output_value('V_High', 1.953678)
+#
+        #self.FS.set_crisp_output_value('E_Low', -3.610834)
+        #self.FS.set_crisp_output_value('E_High', 21.099048)
+#
         #Fuzzy rule definition for T1
         T1_0 = FuzzySet(points=[[-4.805361, 1], [-4.021433, 1], [-3.237506, 0], [3.033915, 0]], term='Depleted')
         T1_1 = FuzzySet(points=[[-4.805361, 0], [-4.021433, 0], [-3.237506, 1], [-1.669651, 1], [0.682132, 0], [3.033915, 0]], term='Partially_depleted')
@@ -87,36 +86,42 @@ class HIVExpertNewModel:
         self.FS.add_linguistic_variable('next_V', LinguisticVariable([next_V_0,next_V_1], concept='V'))
 
         #Define rules for T1
-        #RULES.append('IF (T1p IS High) THEN (next_T1 IS Abundant)')
-        #RULES.append('IF (T1p IS Low) THEN (next_T1 IS Depleted)')
-        #RULES.append('IF (V IS High) THEN (next_T1 IS Partially_depleted)')
+        #RULES.append('IF (T1p IS High) THEN (T1 IS T1_Abundant)')
+        #RULES.append('IF (T1p IS Low) THEN (T1 IS T1_Depleted)')
+        #RULES.append('IF (V IS High) THEN (T1 IS T1_Partially_depleted)')
+
         
         #Define rules for T1_inf
-        RULES.append('IF (V IS High) AND (T1 IS Abundant) THEN (T1_inf IS T1_inf_Abundant)')
-        RULES.append('IF (V IS High) AND (T1 IS Partially_depleted) THEN (T1_inf IS T1_inf_Partially_depleted)')
-        RULES.append('IF (V IS High) AND (T1 IS Depleted) THEN (T1_inf IS T1_inf_Depleted)')
-        RULES.append('IF (V IS Low) THEN (T1_inf IS T1_inf_Depleted)')
-        RULES.append('IF (E IS High) THEN (T1_inf IS T1_inf_Depleted)')
-        RULES.append('IF (e1 IS On) THEN (T1_inf IS T1_inf_Depleted)')
+        RULES.append('IF (V IS High) AND (T1 IS Abundant) THEN (T1_inf IS Abundant)')
+        RULES.append('IF (V IS High) AND (T1 IS Partially_depleted) THEN (T1_inf IS Partially_depleted)')
+        RULES.append('IF (V IS High) AND (T1 IS Depleted) THEN (T1_inf IS Depleted)')
+        RULES.append('IF (V IS Low) THEN (T1_inf IS Depleted)')
+        RULES.append('IF (E IS High) THEN (T1_inf IS Depleted)')
+        RULES.append('IF (e1 IS On) THEN (T1_inf IS Depleted)')
+
+        #Define rules for T2
+        #RULES.append('IF (T2p IS High) THEN (T2 IS T2_High)')
+        #RULES.append('IF (T2p IS Low) THEN (T2 IS T2_Low)')
+        #RULES.append('IF (V IS High) THEN (T2 IS T2_Low)')
         
         #Define rules for T2_inf
-        RULES.append('IF (V IS High) THEN (T2_inf IS T2_inf_High)')
-        RULES.append('IF (T2 IS Low) THEN (T2_inf IS T2_inf_Low)')
-        RULES.append('IF (V IS Low) THEN (T2_inf IS T2_inf_Low)')
-        RULES.append('IF (E IS High) THEN (T2_inf IS T2_inf_Low)')
-        RULES.append('IF (e1 IS On) THEN (T2_inf IS T2_inf_Low)')
+        RULES.append('IF (V IS High) THEN (T2_inf IS High)')
+        RULES.append('IF (T2 IS Low) THEN (T2_inf IS Low)')
+        RULES.append('IF (V IS Low) THEN (T2_inf IS Low)')
+        RULES.append('IF (E IS High) THEN (T2_inf IS Low)')
+        RULES.append('IF (e1 IS On) THEN (T2_inf IS Low)')
         
         #Define rules for V
-        RULES.append('IF (T1_inf IS Abundant) OR (T1_inf IS Partially_depleted) OR (T2_inf IS High) THEN (V IS V_High)')
-        RULES.append('IF (T1_inf IS Depleted) AND (T2_inf IS Low) THEN (V IS V_Low)')
-        RULES.append('IF (e2 IS On) THEN (V IS V_Low)')
+        RULES.append('IF (T1_inf IS Abundant) OR (T1_inf IS Partially_depleted) OR (T2_inf IS High) THEN (V IS High)')
+        RULES.append('IF (T1_inf IS Depleted) AND (T2_inf IS Low) THEN (V IS Low)')
+        RULES.append('IF (e2 IS On) THEN (V IS Low)')
         
         #Define rules for E
-        RULES.append('IF (T1_inf IS Abundant) THEN (E IS E_Low)')
-        RULES.append('IF (T1_inf IS Partially_depleted) THEN (E IS E_High)')
-        RULES.append('IF (T1_inf IS Depleted) THEN (E IS E_Low)')
-        RULES.append('IF (V IS High) THEN (E IS E_Low)')
-        RULES.append('IF (V IS Low) THEN (E IS E_High)')
+        RULES.append('IF (T1_inf IS Abundant) THEN (E IS Low)')
+        RULES.append('IF (T1_inf IS Partially_depleted) THEN (E IS High)')
+        RULES.append('IF (T1_inf IS Depleted) THEN (E IS Low)')
+        RULES.append('IF (V IS High) THEN (E IS Low)')
+        RULES.append('IF (V IS Low) THEN (E IS High)')
         
         #add fuzzy rules
         self.FS.add_rules(RULES)

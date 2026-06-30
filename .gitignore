@@ -11,3 +11,7 @@ venv/
 cache
 mlruns/
 res/
+mlflow.db
+cache/
+hyperparameter_results/
+hyperparameter_optimization_results/

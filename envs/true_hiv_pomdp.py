@@ -14,16 +14,22 @@ class TrueHIVStateDistribution:
         return np.tile(self.initial_state, (n_samples, 1))
 
 class TrueHIVEnvironment(Environment):
-    def __init__(self, initial_biological_state):
+    def __init__(self, initial_biological_state, discount_factor=0.95, p_init=None):
+    
         self.space_info = SpaceInfo(SpaceType.DISCRETE, SpaceType.CONTINUOUS)
-        super().__init__(0.95, "true_hiv_env", self.space_info)
+        super().__init__(discount_factor, "true_hiv_env", self.space_info)
         # True biological state is 6D: [T1, T1*, T2, T2*, V, E]
         self.initial_biological_state = np.array(initial_biological_state, dtype=float)
         self.n_actions = 4 
         
         # Instantiate ONE internal simulator for this environment
         # (This is thread-safe for Joblib parallelization)
-        self.sim = HIVSimulator(logspace=True)
+        if p_init is not None:
+            self.sim = HIVSimulator(logspace=True, p_init=p_init, perturb_params=True)
+            self.sim.reset()
+        else:   
+            self.sim = HIVSimulator(logspace=True)
+            self.sim.reset()
 
     def get_actions(self):
         return list(range(self.n_actions))

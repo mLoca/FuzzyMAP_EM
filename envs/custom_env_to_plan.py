@@ -28,9 +28,9 @@ class DiscreteStateDistribution:
 
 
 class LearnedHIVEnvironment(Environment):
-    def __init__(self, name, learned_params, hiv_reward_function):
+    def __init__(self, name, learned_params, hiv_reward_function, discount_factor=0.95):
         self.space_info = SpaceInfo(SpaceType.DISCRETE, SpaceType.CONTINUOUS)
-        super().__init__(0.95, name, self.space_info)
+        super().__init__(discount_factor, name, self.space_info)
         self.T = learned_params["T"]          # Shape: (n_states, n_actions, n_states)
         self.mu = learned_params["mu"]        # Shape: (n_states, obs_dim)
         self.Sigma = learned_params["Sigma"]  # Shape: (n_states, obs_dim, obs_dim)

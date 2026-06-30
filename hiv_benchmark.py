@@ -1,4 +1,5 @@
 import argparse
+import mlflow
 import torch
 import numpy as np
 import scipy.stats
@@ -26,12 +27,15 @@ from POMDPPlanners.planners.mcts_planners.pomcp import POMCP
 from POMDPPlanners.planners.mcts_planners.pomcpow import POMCPOW
 from POMDPPlanners.simulations.episodes import run_episode
 from POMDPPlanners.utils.action_samplers import DiscreteActionSampler
-from POMDPPlanners.core.environment import (
-    Environment,
-    DiscreteActionsEnvironment,
-    SpaceInfo,
-    SpaceType,
+from POMDPPlanners.configs.environment_configs import EnvironmentConfigsAPI
+from POMDPPlanners.configs.planners_hyperparam_configs import PlannersHyperparamConfigs
+from POMDPPlanners.core.simulation import (
+    NumericalHyperParameter, CategoricalHyperParameter
 )
+from POMDPPlanners.core.simulation.hyperparameter_tuning import (
+    HyperParameterRunParams, HyperParameterOptimizationDirection,  HyperParamPlannerConfig
+)
+
 from POMDPPlanners.core.belief import get_initial_belief
 from POMDPPlanners.utils.belief_factory import create_environment_belief
 from POMDPPlanners.simulations.simulation_apis.local_simulations_api import LocalSimulationsAPI
@@ -87,14 +91,19 @@ class TrueHIVEnvironmentWrapper:
             cov=np.eye(len(next_state)) * 0.05**2
         )
 
-def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=100):
+def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=50):
     """
     Evaluates a policy trained on a Learned Environment inside a True Environment.
     """
     # 1. The Body: Initialize true biological reality (6D array)
+    discount_factor = true_env.discount_factor
+    initial_state = true_env.initial_state_dist().sample()[0]
     seed =42 * episode
     np.random.seed(seed)
     random.seed(seed)
+    random_noise = np.random.uniform(-0.2, 0.2, size=6)
+    true_env = TrueHIVEnvironment(initial_biological_state=initial_state, discount_factor=discount_factor, p_init=random_noise)
+
     true_state = true_env.initial_state_dist().sample()[0]
     
     # 2. The Brain: Initialize the AI's mental state (over states 0, 1, 2)
@@ -148,33 +157,33 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         "mu": fuzzy_model.obs_means,
         "Sigma": fuzzy_model.obs_covs
     }
-    
+    discount_factor = 0.99
 
-    std_env = LearnedHIVEnvironment("std_env", std_params, my_hiv_reward_fn)
-    fuzzy_env = LearnedHIVEnvironment("fuzzy_env", fuzzy_params, my_hiv_reward_fn)
+    std_env = LearnedHIVEnvironment("std_env", std_params, my_hiv_reward_fn, discount_factor=discount_factor) 
+    fuzzy_env = LearnedHIVEnvironment("fuzzy_env", fuzzy_params, my_hiv_reward_fn, discount_factor=discount_factor)
 
     std_sampler = DiscreteActionSampler(std_env.get_actions())
     fuzzy_sampler = DiscreteActionSampler(fuzzy_env.get_actions())
 
     unhealthy_steady_state = [163573., 5., 11945., 46., 63919., 24.]
-    true_env = TrueHIVEnvironment(initial_biological_state=unhealthy_steady_state)
+    true_env = TrueHIVEnvironment(initial_biological_state=unhealthy_steady_state, discount_factor=discount_factor)
 
     # 2. Configure the planners
     # Note: You need to tune these hyperparameters based on your HIV benchmark
     planner_config = {
         "n_simulations":1000,
-        "depth": 30,
-        "discount_factor": 0.95,
-        "exploration_constant": 50000.0,
-        "k_o": 2,
-        "k_a": 4,
-        "alpha_o": 0.5,
-        "alpha_a": 0.0,
+        "depth": 4,
+        "discount_factor": 0.99,
+        "exploration_constant": 5.03234344611369,
+        "k_o": 3.109171061458331,
+        "k_a": 3.790951760010555,
+        "alpha_o": 0.421353621171025,
+        "alpha_a": 0.3452060586475484,
     }
 
     # Swap POMCP for PFT_DPW
-    std_policy = POMCPOW(std_env,action_sampler=std_sampler, name="PFT_DPW_Standard", **planner_config)
-    fuzzy_policy = POMCPOW(fuzzy_env,action_sampler=fuzzy_sampler, name="PFT_DPW_Fuzzy", **planner_config)
+    std_policy = POMCPOW(std_env,action_sampler=std_sampler, name="POMCP_Standard", **planner_config)
+    fuzzy_policy = POMCPOW(fuzzy_env,action_sampler=fuzzy_sampler, name="POMCP_Fuzzy", **planner_config)
 
     # 3. Setup Initial Beliefs (e.g., Uniform particle belief)
     # You can customize this based on the POMDPPlanners documentation
@@ -182,59 +191,63 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     fuzzy_initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
 
     # 4. Run the Evaluation
-    api = LocalSimulationsAPI()
-    print("Evaluating Standard EM Model...")
-    #std_results = api.run_multiple_environments_and_policies(
-    #    environment_run_params=[
-    #        EnvironmentRunParams(
-    #            environment=std_env,
-    #            belief=initial_belief,
-    #            policies=[std_policy],
-    #            num_episodes=100,
-    #            num_steps=100
-    #        )
-    #    ],
-    #    alpha=0.1,  # Required by the API for risk metrics (CVaR/VaR)
-    #    confidence_interval_level=0.95,
-    #    experiment_name="Standard_EM_Evaluation"
-    #)
-    logger = get_logger("basic_example",
-                    output_dir=Path("/tmp/test_logs"),
-                    console_output=True)
+    #api = LocalSimulationsAPI(
+    #    cache_dir_path=Path("./hyperparameter_results"),
+    #    debug=True)
+    ## Hyperparamatters optimization
+    #optimization_configs = [
+    #    HyperParameterRunParams(
+    #        environment=std_env,
+    #        belief=std_initial_belief,
+    #        hyper_param_planner_config=HyperParamPlannerConfig(
+    #            policy_cls=POMCPOW,
+    #            hyper_parameters=[
+    #                NumericalHyperParameter(0.1, 100., "exploration_constant"),  # Reduced range
+    #                NumericalHyperParameter(2, 4, "depth"),  # Reduced depth
+    #                NumericalHyperParameter(1.0, 5.0, "k_o"),  # Observation progressive widening coefficient
+    #                NumericalHyperParameter(1.0, 5.0, "k_a"),  # Action progressive widening coefficient
+    #                NumericalHyperParameter(0.01, 0.5, "alpha_o"),  # Observation progressive widening exponent
+    #                NumericalHyperParameter(0.01, 0.5, "alpha_a")   # Action progressive widening exponent
+    #            ],
+    #            constant_parameters={
+    #                "discount_factor": 0.99,
+    #                "n_simulations": 2000,  # Minimal simulations for testing
+    #                "action_sampler": std_sampler,
+    #                "name": "OptimizedPOMCPOW_HIV"
+    #            },
+    #        ),
+    #        num_episodes=20,       # Episodes for final evaluation
+    #        num_steps=200,          # Steps per episode
+    #        n_trials=50,         # Number of optimization trials
+    #        parameters_to_optimize=[("average_return", HyperParameterOptimizationDirection.MAXIMIZE)]
+    #    )
+    #]
+    #import os
+    #os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
 
-    #history = run_episode(
-    #    environment=true_env,
-    #    policy=fuzzy_policy,
-    #    initial_belief=initial_belief,
-    #    num_steps=5,
-    #    logger=logger
-    #)
+    #import mlflow
 
-    environment_run_params=[
-        EnvironmentRunParams(
-            environment=true_env,
-            belief=std_initial_belief,
-            policies=[std_policy],
-            num_episodes=15,
-            num_steps=10
-        ),
-        EnvironmentRunParams(
-            environment=true_env,
-            belief=fuzzy_initial_belief,
-            policies=[fuzzy_policy],
-            num_episodes=15,
-            num_steps=10
-        ),
-    ]
+    #results = api.run_hyperparameter_optimization(
+    #    environment_run_params=optimization_configs,
+    #    experiment_name="HIV_POMCP_Optimization",
+    #    n_jobs=-1,  # Use all available CPU cores
+    #)
+    # Analyze results
+    #for i, result in enumerate(results):
+    #    print(f"Configuration {i+1} Results:")
+    #    print(f"  Environment: {result.environment.__class__.__name__}")
+    #    print(f"  Policy: {result.policy.__class__.__name__}")
+    #    print(f"  Best hyperparameters: {result.chosen_hyper_parameters}")
+    #    print(f"  Policy name: {result.policy.name}")
 
     print("Evaluating Standard and Fuzzy-MAP EM Models")
     
     jobs = []
-    for ep in range(10):  # 100 episodes
+    for ep in range(40):  # 100 episodes
         jobs.append((std_policy, std_initial_belief, ep))
         jobs.append((fuzzy_policy, fuzzy_initial_belief, ep))
 
-    all_results = Parallel(n_jobs=-1)(
+    all_results = Parallel(n_jobs=80)(
         delayed(evaluate_cross_environment)(true_env, pol, belief, episode=ep) 
         for pol, belief, ep in jobs
     )
@@ -341,11 +354,12 @@ def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewar
 # DATASET GENERATION & BENCHMARK LOOP
 # ==============================================================================
 class HIVDatasetGenerator:
-    def __init__(self, is_pomdp=True, max_steps=100, noise_std=0.05, seed=42):
+    def __init__(self, is_pomdp=True, max_steps=100, noise_std=0.05, seed=42, test = False):
         self.is_pomdp = is_pomdp
         self.max_steps = max_steps
         self.noise_std = noise_std
         self.seed = seed
+        self.test = test
         self.env = HIVSimulator(podmp=self.is_pomdp, logspace=True)
         self.env.seed(seed)
         np.random.seed(seed)
@@ -354,24 +368,30 @@ class HIVDatasetGenerator:
 
     def _generate_single_patient(self, patient_seed):
         # Create a fresh thread-safe simulator for each patient
-        env = HIVSimulator(podmp=self.is_pomdp, logspace=True)
-        env.seed(patient_seed)
+       
         np.random.seed(patient_seed)
         import random
         random.seed(patient_seed)
+        random_noise = np.random.uniform(-0.2, 0.2, size=6)
+        env = HIVSimulator(podmp=self.is_pomdp, logspace=True, p_init=random_noise)
+        env.seed(patient_seed)
+        
         
         true_state = env.reset(perturb_params=True)
         patient_obs, patient_acts = [], []
 
         for step in range(self.max_steps):
-            noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
+            noisy_obs = true_state + np.random.normal(0, 0, size=true_state.shape)
             patient_obs.append(noisy_obs)
-            action = np.random.randint(0, env.num_actions)
+            if self.test:
+                action = 0 if patient_seed % 2 == 0 else 3
+            else:
+                action = np.random.randint(0, env.num_actions)
             patient_acts.append(int(action))
             true_state, reward, is_terminal, info = env.step(action)
             if is_terminal: break
         
-        final_noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
+        final_noisy_obs = true_state + np.random.normal(0, 0, size=true_state.shape)
         patient_obs.append(final_noisy_obs)
 
         return patient_obs, patient_acts
@@ -401,8 +421,9 @@ def run_hiv_benchmark_with_ci(args):
 
     for trial in range(args.n_runs):
         print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
-        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=100, seed=42 + trial)
+        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=50, seed=42 + trial)
         train_obs, train_acts = data_gen.generate(n_patients=300)
+        data_gen.test = True
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
         for n_train in args.train_sizes:
@@ -423,10 +444,10 @@ def run_hiv_benchmark_with_ci(args):
                 action_mapping=hiv_action_mapping,
                 hyperparameter_update_method="adaptive",
                 obs_var_index=hiv_var_mapping,
-                alpha_ah=0.1,
+                alpha_ah=0.2,
                 use_fuzzy=True,
                 ensure_psd=True,
-                parallel=False,
+                parallel=True,
             )
             em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
@@ -444,7 +465,7 @@ def run_hiv_benchmark_with_ci(args):
             results['EM_LL'][n_train].append(em_ll)
             results['Fuzzy_LL'][n_train].append(fuzzy_ll)
             
-            # --- RUN PLANNING EVALUATION VIA LOCAL_SIMULATION_API ---
+            # --- RUN PLANNING EVALUATION ---
             if True:
                 eval_env = HIVSimulator(podmp=True, logspace=True)
                 eval_env.seed(88 + trial)
@@ -500,14 +521,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
     parser.add_argument("--n_runs", type=int, default=1, help="Number of independent trials to compute confidence intervals")
     parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
-    parser.add_argument("--n_states", type=int, default=2, help="Discrete latent phases")
+    parser.add_argument("--n_states", type=int, default=5, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=2, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=1, help="Observation fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=2, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[10])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()

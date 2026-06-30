@@ -3,7 +3,7 @@ global_settings:
   output_dir: "./results/"
   use_cache: True
   verbose: False
-  parallel_execution: False
+  parallel_execution: True
 
 environments:
   - name: "env_standard_healthcare_mvn"
@@ -209,7 +209,7 @@ experiments:
           integration_method: "mean"
           alpha_ah: 0.10
           lambda_T: 0.75
-          lambda_O: 0.25
+          lambda_O: 0.50
 
       - name: "Fuzzy_EB_EM"
         class: "FuzzyPOMDP"
@@ -355,7 +355,7 @@ experiments:
           integration_method: "montecarlo"
           mc_samples: 200
   hyperparameter_grid_search:
-    active: False
+    active: True
     description: "Grid Search for lambda."
     environments: ["env_standard_healthcare_mvn", "env_medium_healthcare_mvn", "env_hard_healthcare_mvn"]
     sequence_length: 3
