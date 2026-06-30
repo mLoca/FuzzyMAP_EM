@@ -429,7 +429,7 @@ def run_hiv_benchmark_with_ci(args):
         data_gen.test = True
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
-        for n_train in args.train_sizes:
+        def evaluate_configuration(n_train, train_obs, train_acts, test_obs, test_acts, trial):
             print(f"\n--- Evaluating Data Scarcity: N={n_train} ---")
             observations = train_obs[:n_train]
             actions = train_acts[:n_train]
@@ -455,32 +455,37 @@ def run_hiv_benchmark_with_ci(args):
             em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
             em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
-            print(f"Standard EM   -> L1: {em_l1:.3f} | Test LL: {em_ll:.3f}")
+            print(f"Standard EM (N={n_train})   -> L1: {em_l1:.3f} | Test LL: {em_ll:.3f}")
 
             fuzzy_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             fuzzy_l1 = compute_avg_l1_error(fuzzy_model, test_obs, test_acts)
             fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)       
-            print(f"Fuzzy-MAP EM  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
+            print(f"Fuzzy-MAP EM (N={n_train})  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
 
+            # --- RUN PLANNING EVALUATION ---
+            eval_env = HIVSimulator(podmp=True, logspace=True)
+            eval_env.seed(88 + trial)
+            std_ret, fuzzy_ret = evaluate_planning_performance(
+                true_env=eval_env,
+                em_model=em_model,
+                fuzzy_model=fuzzy_model,
+                n_episodes=20,
+                horizon=10
+            )
+            return n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret
 
+        config_results = Parallel(n_jobs=len(args.train_sizes))(
+            delayed(evaluate_configuration)(n_train, train_obs, train_acts, test_obs, test_acts, trial)
+            for n_train in args.train_sizes
+        )
+
+        for n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret in config_results:
             results['EM_L1'][n_train].append(em_l1)
             results['Fuzzy_L1'][n_train].append(fuzzy_l1)
             results['EM_LL'][n_train].append(em_ll)
             results['Fuzzy_LL'][n_train].append(fuzzy_ll)
-            
-            # --- RUN PLANNING EVALUATION ---
-            if True:
-                eval_env = HIVSimulator(podmp=True, logspace=True)
-                eval_env.seed(88 + trial)
-                std_ret, fuzzy_ret = evaluate_planning_performance(
-                    true_env=eval_env,
-                    em_model=em_model,
-                    fuzzy_model=fuzzy_model,
-                    n_episodes=20,
-                    horizon=10
-                )
-                results['EM_Return'][n_train].extend(std_ret)
-                results['Fuzzy_Return'][n_train].extend(fuzzy_ret)
+            results['EM_Return'][n_train].extend(std_ret)
+            results['Fuzzy_Return'][n_train].extend(fuzzy_ret)
 
     return results
 
