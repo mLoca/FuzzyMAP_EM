@@ -270,6 +270,7 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     print(f"Fuzzy 95% CI: [{scipy.stats.norm.interval(0.95, loc=np.mean(fuzzy_returns), scale=scipy.stats.sem(fuzzy_returns))}]")
 
     plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewards)
+    return std_returns, fuzzy_returns
 
 def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewards, save_path='res/patient_trajectories.png'):
     import matplotlib.pyplot as plt
@@ -416,7 +417,9 @@ def run_hiv_benchmark_with_ci(args):
             'Pyro_L1': {s: [] for s in args.train_sizes},
             'EM_LL': {s: [] for s in args.train_sizes},
             'Fuzzy_LL': {s: [] for s in args.train_sizes},
-            'Pyro_LL': {s: [] for s in args.train_sizes}
+            'Pyro_LL': {s: [] for s in args.train_sizes},
+            'EM_Return': {s: [] for s in args.train_sizes},
+            'Fuzzy_Return': {s: [] for s in args.train_sizes}
         }
 
     for trial in range(args.n_runs):
@@ -469,13 +472,15 @@ def run_hiv_benchmark_with_ci(args):
             if True:
                 eval_env = HIVSimulator(podmp=True, logspace=True)
                 eval_env.seed(88 + trial)
-                evaluate_planning_performance(
+                std_ret, fuzzy_ret = evaluate_planning_performance(
                     true_env=eval_env,
                     em_model=em_model,
                     fuzzy_model=fuzzy_model,
                     n_episodes=20,
                     horizon=10
                 )
+                results['EM_Return'][n_train].extend(std_ret)
+                results['Fuzzy_Return'][n_train].extend(fuzzy_ret)
 
     return results
 
@@ -516,10 +521,52 @@ def plot_results_with_ci(train_sizes, results, save_path='res/custom_hiv_benchma
     plt.savefig(save_path, dpi=300)
     print(f"\nStatistical plots saved successfully to {save_path}")
 
+def plot_returns_bar_chart(train_sizes, results, save_path='res/cumulative_returns_bar.png'):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import pandas as pd
+    
+    em_returns_dict = results.get('EM_Return', {})
+    fuzzy_returns_dict = results.get('Fuzzy_Return', {})
+    
+    if not em_returns_dict or not fuzzy_returns_dict:
+        return
+        
+    # Prepare data for Seaborn DataFrame
+    data = []
+    for s in train_sizes:
+        for val in em_returns_dict.get(s, []):
+            data.append({'Scenario (Training Set Size)': str(s), 'Average Cumulative Return': val, 'Model': 'Standard EM'})
+        for val in fuzzy_returns_dict.get(s, []):
+            data.append({'Scenario (Training Set Size)': str(s), 'Average Cumulative Return': val, 'Model': 'Fuzzy-MAP EM'})
+            
+    if not data:
+        return
+        
+    df = pd.DataFrame(data)
+    
+    plt.figure(figsize=(10, 6))
+    
+    # Use seaborn barplot which automatically handles the confidence intervals (95% CI by default)
+    sns.barplot(
+        data=df, 
+        x='Scenario (Training Set Size)', 
+        y='Average Cumulative Return', 
+        hue='Model', 
+        capsize=.1,
+        palette={'Standard EM': 'blue', 'Fuzzy-MAP EM': 'orange'},
+        alpha=0.7
+    )
+    
+    plt.title('Cumulative Return per Scenario with 95% Confidence')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    print(f"Returns bar chart saved to {save_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
-    parser.add_argument("--n_runs", type=int, default=1, help="Number of independent trials to compute confidence intervals")
+    parser.add_argument("--n_runs", type=int, default=40, help="Number of independent trials to compute confidence intervals")
     parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
     parser.add_argument("--n_states", type=int, default=5, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
@@ -528,9 +575,10 @@ if __name__ == "__main__":
     parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
     parser.add_argument("--lambda_o", type=float, default=2, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[10, 15, 20, 25])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
     results = run_hiv_benchmark_with_ci(args)
     plot_results_with_ci(args.train_sizes, results)
+    plot_returns_bar_chart(args.train_sizes, results)
