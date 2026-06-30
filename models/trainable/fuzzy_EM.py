@@ -1,11 +1,14 @@
 import numpy as np
 from scipy.special import digamma
 from scipy.stats import norm
+from joblib import Parallel, delayed
 
 from models.trainable.pomdp_EM import PomdpEM
 
 from fuzzy.fuzzy_model import build_fuzzymodel
 from utils.utils import _prob_sum, multidigamma
+
+
 
 
 class FuzzyPOMDP(PomdpEM):
@@ -77,6 +80,48 @@ class FuzzyPOMDP(PomdpEM):
 
         self.obs_var_index = obs_var_index if obs_var_index is not None else {"test_result": 0, "symptoms": 1}
         self.action_mapping = action_mapping if action_mapping is not None else {}
+
+    def _process_single_sa(self, s, a, rules):
+        # Group rules by output variable
+        pred_sum = np.zeros(self.obs_dim)
+        weight_sum = np.zeros(self.obs_dim)
+        
+        for rule in rules:
+            match_score = self._match_rule_ant(rule, a, s)
+            if match_score < 1e-9: continue
+            
+            cons_s, var_name = self._match_rule_cons(rule, a, s)
+            clean_var_name = var_name.replace("next_", "").strip()
+            idx = self.obs_var_index.get(clean_var_name)
+            if idx is None: continue
+            
+            pred_sum[idx] += match_score * cons_s
+            weight_sum[idx] += match_score
+        
+        # If no rules fired, skip
+        if np.sum(weight_sum) < 1e-9:
+            return None
+        
+        # Compute crisp prediction vector
+        crisp_pred = np.zeros(self.obs_dim)
+        for i in range(self.obs_dim):
+            if weight_sum[i] > 1e-9:
+                crisp_pred[i] = pred_sum[i] / weight_sum[i]
+            else:
+                crisp_pred[i] = self.obs_means[s][i] # fallback
+                
+        # Use the average weight as the overall match score
+        overall_match_score = np.mean(weight_sum)
+        
+        # Now distribute this expected crisp prediction to s_prime
+        raw_pdfs = np.zeros(self.n_states)
+        for s_prime in range(self.n_states):
+            ll = 1.0
+            for i in range(self.obs_dim):
+                ll *= self._marginal_likelihood(crisp_pred[i], s_prime, i)
+            raw_pdfs[s_prime] = ll
+            
+        return s, a, overall_match_score, crisp_pred, raw_pdfs
 
     def _match_rule_ant(self, rule, action, O_means, state=0):
         """
@@ -280,60 +325,32 @@ class FuzzyPOMDP(PomdpEM):
         pseudo_count_O_mean = np.zeros((self.n_states, self.obs_dim))
         pseudo_count_O_cov = np.zeros((self.n_states, self.obs_dim, self.obs_dim))
 
-        for s in range(self.n_states):
-            for a in range(self.n_actions):
-                
-                # Group rules by output variable
-                pred_sum = np.zeros(self.obs_dim)
-                weight_sum = np.zeros(self.obs_dim)
-                
-                for rule in rules:
-                    match_score = self._match_rule_ant(rule, a, s)
-                    if match_score < 1e-9: continue
-                    
-                    cons_s, var_name = self._match_rule_cons(rule, a, s)
-                    clean_var_name = var_name.replace("next_", "").strip()
-                    idx = self.obs_var_index.get(clean_var_name)
-                    if idx is None: continue
-                    
-                    pred_sum[idx] += match_score * cons_s
-                    weight_sum[idx] += match_score
-                
-                # If no rules fired, skip
-                if np.sum(weight_sum) < 1e-9:
-                    continue
-                
-                # Compute crisp prediction vector
-                crisp_pred = np.zeros(self.obs_dim)
-                for i in range(self.obs_dim):
-                    if weight_sum[i] > 1e-9:
-                        crisp_pred[i] = pred_sum[i] / weight_sum[i]
-                    else:
-                        crisp_pred[i] = self.obs_means[s][i] # fallback
-                        
-                # Use the average weight as the overall match score
-                overall_match_score = np.mean(weight_sum)
-                
-                # Now distribute this expected crisp prediction to s_prime
-                raw_pdfs = np.zeros(self.n_states)
-                for s_prime in range(self.n_states):
-                    ll = 1.0
-                    for i in range(self.obs_dim):
-                        ll *= self._marginal_likelihood(crisp_pred[i], s_prime, i)
-                    raw_pdfs[s_prime] = ll
-                
-                sum_pdfs = np.sum(raw_pdfs) + 1e-10 
-                normalized_pdfs = raw_pdfs / sum_pdfs
+        if self.parallel:
+            results = Parallel(n_jobs=-1)(
+                delayed(_process_single_sa)(self, s, a, rules)
+                for s in range(self.n_states)
+                for a in range(self.n_actions)
+            )
+        else:
+            results = [
+                _process_single_sa(self, s, a, rules)
+                for s in range(self.n_states)
+                for a in range(self.n_actions)
+            ]
 
-                for s_prime in range(self.n_states):
-                    strength = overall_match_score * self.transitions[s, a, s_prime]
-                    
-                    pseudo_count_O_den[s_prime] += strength
-                    pseudo_count_O_mean[s_prime, :] += strength * crisp_pred
-                    pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 0.05)
+        for res in results:
+            if res is None:
+                continue
+            s, a, overall_match_score, crisp_pred, raw_pdfs = res
 
-                    
-                    pseudo_count_T[s, a, s_prime] += overall_match_score * raw_pdfs[s_prime]
+            for s_prime in range(self.n_states):
+                strength = overall_match_score * self.transitions[s, a, s_prime]
+                
+                pseudo_count_O_den[s_prime] += strength
+                pseudo_count_O_mean[s_prime, :] += strength * crisp_pred
+                pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 0.05)
+                
+                pseudo_count_T[s, a, s_prime] += overall_match_score * raw_pdfs[s_prime]
 
         return pseudo_count_T, pseudo_count_O_den, pseudo_count_O_mean, pseudo_count_O_cov
 
