@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_backend
 import random
 from fuzzy.HIV_fuzzy_new import HIVExpertNewModel
 
@@ -247,7 +247,7 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         jobs.append((std_policy, std_initial_belief, ep))
         jobs.append((fuzzy_policy, fuzzy_initial_belief, ep))
 
-    all_results = Parallel(n_jobs=80)(
+    all_results = Parallel(n_jobs=-1)(
         delayed(evaluate_cross_environment)(true_env, pol, belief, episode=ep) 
         for pol, belief, ep in jobs
     )
@@ -474,7 +474,7 @@ def run_hiv_benchmark_with_ci(args):
             )
             return n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret
 
-        config_results = Parallel(n_jobs=len(args.train_sizes))(
+        config_results = Parallel(n_jobs=-1)(
             delayed(evaluate_configuration)(n_train, train_obs, train_acts, test_obs, test_acts, trial)
             for n_train in args.train_sizes
         )
@@ -584,6 +584,12 @@ if __name__ == "__main__":
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
-    results = run_hiv_benchmark_with_ci(args)
+    
+    # Optimize for 96 cores and 200GB RAM:
+    # Use a global loky pool of 96 workers to prevent oversubscription from nested Parallel calls.
+    # inner_max_num_threads=1 prevents Numpy/OpenBLAS from spawning internal threads that conflict with multiprocessing.
+    with parallel_backend('loky', n_jobs=96, inner_max_num_threads=1):
+        results = run_hiv_benchmark_with_ci(args)
+        
     plot_results_with_ci(args.train_sizes, results)
     plot_returns_bar_chart(args.train_sizes, results)
