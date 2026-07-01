@@ -590,6 +590,93 @@ def plot_returns_bar_chart(train_sizes, results, save_path='res/cumulative_retur
     print(f"Returns bar chart saved to {save_path}")
 
 
+def run_grid_search(args):
+    import itertools
+    import pandas as pd
+    import seaborn as sns
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from joblib import parallel_backend, Parallel, delayed
+    
+    lambda_vals = [0, 5, 10, 15, 20, 25]
+    n_patients = 15
+    n_trials = 5
+    
+    def evaluate_grid_point(lt, lo, trial, train_obs, train_acts, test_obs, test_acts):
+        hiv_var_mapping = {"T1": 0, "T2": 1, "V":  2, "E":  3} 
+        fuzzy_model = FuzzyMAP_EM(
+            n_states=args.n_states, 
+            n_actions=args.n_actions, 
+            obs_dim=args.n_obs_dim,  
+            lambda_T=lt, 
+            lambda_O=lo,
+            fuzzy_model=HIVExpertNewModel().get_model(),
+            action_mapping=hiv_action_mapping,
+            hyperparameter_update_method="adaptive",
+            obs_var_index=hiv_var_mapping,
+            alpha_ah=0.2,
+            use_fuzzy=True,
+            ensure_psd=True,
+            parallel=True,
+        )
+        
+        fuzzy_model.fit(train_obs, train_acts, max_iterations=args.n_iter, tolerance=1e-4)
+        fuzzy_l1 = compute_avg_l1_error(fuzzy_model, test_obs, test_acts)
+        fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)
+        
+        print(f"[Trial {trial}] lambda_T={lt}, lambda_O={lo} -> L1={fuzzy_l1:.3f}, LL={fuzzy_ll:.3f}")
+        return {'lambda_t': lt, 'lambda_o': lo, 'trial': trial, 'L1': fuzzy_l1, 'LL': fuzzy_ll}
+
+    def evaluate_wrapper(lt, lo, trial, train_obs, train_acts, test_obs, test_acts):
+        with parallel_backend('loky', n_jobs=24, inner_max_num_threads=1):
+            return evaluate_grid_point(lt, lo, trial, train_obs, train_acts, test_obs, test_acts)
+
+    trial_data = {}
+    print(f"Generating data for {n_trials} trials...")
+    with parallel_backend('loky', n_jobs=96, inner_max_num_threads=1):
+        for trial in range(n_trials):
+            data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=50, seed=42 + trial)
+            train_obs, train_acts = data_gen.generate(n_patients=n_patients)
+            data_gen.test = True
+            test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
+            trial_data[trial] = (train_obs, train_acts, test_obs, test_acts)
+
+    grid = list(itertools.product(lambda_vals, lambda_vals, range(n_trials)))
+    
+    print(f"\n{'='*40}\n   STARTING GRID SEARCH ({len(grid)} tasks)\n{'='*40}")
+    out = Parallel(n_jobs=4, backend='loky')(
+        delayed(evaluate_wrapper)(
+            lt, lo, trial, 
+            trial_data[trial][0], trial_data[trial][1], 
+            trial_data[trial][2], trial_data[trial][3]
+        ) for lt, lo, trial in grid
+    )
+    
+    df = pd.DataFrame(out)
+    
+    mean_df = df.groupby(['lambda_t', 'lambda_o'])[['L1', 'LL']].mean().reset_index()
+    pivot_l1 = mean_df.pivot(index='lambda_t', columns='lambda_o', values='L1')
+    pivot_ll = mean_df.pivot(index='lambda_t', columns='lambda_o', values='LL')
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    sns.heatmap(pivot_l1, annot=True, cmap='viridis_r', ax=axes[0], fmt=".3f")
+    axes[0].set_title('Grid Search: Average L1 Error')
+    axes[0].set_xlabel('Lambda_O')
+    axes[0].set_ylabel('Lambda_T')
+    
+    sns.heatmap(pivot_ll, annot=True, cmap='viridis', ax=axes[1], fmt=".2f")
+    axes[1].set_title('Grid Search: Average Log-Likelihood')
+    axes[1].set_xlabel('Lambda_O')
+    axes[1].set_ylabel('Lambda_T')
+    
+    plt.tight_layout()
+    plt.savefig('res/grid_search_heatmaps.png', dpi=300)
+    print("Grid search complete. Heatmaps saved to res/grid_search_heatmaps.png")
+    
+    df.to_csv('res/grid_search_results.csv', index=False)
+    return df
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
     parser.add_argument("--n_runs", type=int, default=10, help="Number of independent trials to compute confidence intervals")
@@ -603,10 +690,13 @@ if __name__ == "__main__":
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
     parser.add_argument("--train_sizes", type=int, nargs='+', default=[10, 15, 20, 25])
     parser.add_argument("--n_test", type=int, default=800)
+    parser.add_argument("--grid_search", action="store_true", help="Run hyperparameter grid search for lambda_T and lambda_O")
 
     args = parser.parse_args()
     
-    results = run_hiv_benchmark_with_ci(args)
-        
-    plot_results_with_ci(args.train_sizes, results)
-    plot_returns_bar_chart(args.train_sizes, results)
+    if args.grid_search:
+        run_grid_search(args)
+    else:
+        results = run_hiv_benchmark_with_ci(args)
+        plot_results_with_ci(args.train_sizes, results)
+        plot_returns_bar_chart(args.train_sizes, results)
