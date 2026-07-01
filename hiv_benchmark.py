@@ -91,7 +91,7 @@ class TrueHIVEnvironmentWrapper:
             cov=np.eye(len(next_state)) * 0.05**2
         )
 
-def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=50):
+def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=40):
     """
     Evaluates a policy trained on a Learned Environment inside a True Environment.
     """
@@ -145,7 +145,7 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
         
     return total_reward, np.array(states_history), np.array(rewards_history)
 
-def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50, horizon=15):
+def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50, horizon=15, hyper_optimize=False):
     std_params = {
         "T": em_model.transitions,          
         "mu": em_model.obs_means,     
@@ -170,20 +170,30 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
 
     # 2. Configure the planners
     # Note: You need to tune these hyperparameters based on your HIV benchmark
-    planner_config = {
+    planner_config_std = {
         "n_simulations":1000,
-        "depth": 4,
+        "depth": 3,
         "discount_factor": 0.99,
-        "exploration_constant": 5.03234344611369,
-        "k_o": 3.109171061458331,
-        "k_a": 3.790951760010555,
-        "alpha_o": 0.421353621171025,
-        "alpha_a": 0.3452060586475484,
+        "exploration_constant": 34.80716243797442,
+        "k_o": 4.868167504611893,
+        "k_a": 4.203111794128549,
+        "alpha_o": 0.3982346933640448,
+        "alpha_a": 0.46669636595271263,
     }
 
-    # Swap POMCP for PFT_DPW
-    std_policy = POMCPOW(std_env,action_sampler=std_sampler, name="POMCP_Standard", **planner_config)
-    fuzzy_policy = POMCPOW(fuzzy_env,action_sampler=fuzzy_sampler, name="POMCP_Fuzzy", **planner_config)
+    std_policy = POMCPOW(std_env,action_sampler=std_sampler, name="POMCP_Standard", **planner_config_std)
+    planner_config_fuzzy = {
+        "n_simulations":1000,
+        "depth": 3,
+        "discount_factor": 0.99,
+        "exploration_constant": 58.28369005105695,
+        "k_o": 4.571573457147612,
+        "k_a": 3.2061026430432484,
+        "alpha_o": 0.21689427930779825,
+        "alpha_a": 0.48918164871267744,
+    }
+
+    fuzzy_policy = POMCPOW(fuzzy_env,action_sampler=fuzzy_sampler, name="POMCP_Fuzzy", **planner_config_std)
 
     # 3. Setup Initial Beliefs (e.g., Uniform particle belief)
     # You can customize this based on the POMDPPlanners documentation
@@ -191,59 +201,62 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     fuzzy_initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
 
     # 4. Run the Evaluation
-    #api = LocalSimulationsAPI(
-    #    cache_dir_path=Path("./hyperparameter_results"),
-    #    debug=True)
-    ## Hyperparamatters optimization
-    #optimization_configs = [
-    #    HyperParameterRunParams(
-    #        environment=std_env,
-    #        belief=std_initial_belief,
-    #        hyper_param_planner_config=HyperParamPlannerConfig(
-    #            policy_cls=POMCPOW,
-    #            hyper_parameters=[
-    #                NumericalHyperParameter(0.1, 100., "exploration_constant"),  # Reduced range
-    #                NumericalHyperParameter(2, 4, "depth"),  # Reduced depth
-    #                NumericalHyperParameter(1.0, 5.0, "k_o"),  # Observation progressive widening coefficient
-    #                NumericalHyperParameter(1.0, 5.0, "k_a"),  # Action progressive widening coefficient
-    #                NumericalHyperParameter(0.01, 0.5, "alpha_o"),  # Observation progressive widening exponent
-    #                NumericalHyperParameter(0.01, 0.5, "alpha_a")   # Action progressive widening exponent
-    #            ],
-    #            constant_parameters={
-    #                "discount_factor": 0.99,
-    #                "n_simulations": 2000,  # Minimal simulations for testing
-    #                "action_sampler": std_sampler,
-    #                "name": "OptimizedPOMCPOW_HIV"
-    #            },
-    #        ),
-    #        num_episodes=20,       # Episodes for final evaluation
-    #        num_steps=200,          # Steps per episode
-    #        n_trials=50,         # Number of optimization trials
-    #        parameters_to_optimize=[("average_return", HyperParameterOptimizationDirection.MAXIMIZE)]
-    #    )
-    #]
-    #import os
-    #os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
-
-    #import mlflow
-
-    #results = api.run_hyperparameter_optimization(
-    #    environment_run_params=optimization_configs,
-    #    experiment_name="HIV_POMCP_Optimization",
-    #    n_jobs=-1,  # Use all available CPU cores
-    #)
-    # Analyze results
-    #for i, result in enumerate(results):
-    #    print(f"Configuration {i+1} Results:")
-    #    print(f"  Environment: {result.environment.__class__.__name__}")
-    #    print(f"  Policy: {result.policy.__class__.__name__}")
-    #    print(f"  Best hyperparameters: {result.chosen_hyper_parameters}")
-    #    print(f"  Policy name: {result.policy.name}")
+    if hyper_optimize:
+        print("Starting Hyperparameter Optimization for POMCPOW...")
+        api = LocalSimulationsAPI(
+            cache_dir_path=Path("./hyperparameter_results"),
+            debug=True)
+        # Hyperparamatters optimization
+        for env in [std_env, fuzzy_env]:
+            initial_belief = std_initial_belief if env.name == "std_env" else fuzzy_initial_belief
+            optimization_configs = [
+                HyperParameterRunParams(
+                    environment=env,
+                    belief=initial_belief,
+                    hyper_param_planner_config=HyperParamPlannerConfig(
+                        policy_cls=POMCPOW,
+                        hyper_parameters=[
+                            NumericalHyperParameter(0.1, 100., "exploration_constant"),  # Reduced range
+                            NumericalHyperParameter(2, 4, "depth"),  # Reduced depth
+                            NumericalHyperParameter(1.0, 5.0, "k_o"),  # Observation progressive widening coefficient
+                            NumericalHyperParameter(1.0, 5.0, "k_a"),  # Action progressive widening coefficient
+                            NumericalHyperParameter(0.01, 0.5, "alpha_o"),  # Observation progressive widening exponent
+                            NumericalHyperParameter(0.01, 0.5, "alpha_a")   # Action progressive widening exponent
+                        ],
+                        constant_parameters={
+                            "discount_factor": 0.99,
+                            "n_simulations": 2000,  # Minimal simulations for testing
+                            "action_sampler": std_sampler,
+                            "name": "OptimizedPOMCPOW_HIV"
+                        },
+                    ),
+                    num_episodes=25,       # Episodes for final evaluation
+                    num_steps=50,          # Steps per episode
+                    n_trials=25,         # Number of optimization trials
+                    parameters_to_optimize=[("average_return", HyperParameterOptimizationDirection.MAXIMIZE)]
+                )
+            ]
+            import os
+            os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
+            import mlflow
+            results = api.run_hyperparameter_optimization(
+                environment_run_params=optimization_configs,
+                experiment_name="HIV_POMCP_Optimization",
+                n_jobs=-1,  # Use all available CPU cores
+            )
+            #Analyze results
+            print(f"Results for environment: {env.name}")
+            for i, result in enumerate(results):
+                print(f"Configuration {i+1} Results:")
+                print(f"  Environment: {result.environment.__class__.__name__}")
+                print(f"  Policy: {result.policy.__class__.__name__}")
+                print(f"  Best hyperparameters: {result.chosen_hyper_parameters}")
+                print(f"  Policy name: {result.policy.name}")
 
     print("Evaluating Standard and Fuzzy-MAP EM Models")
     
     jobs = []
-    for ep in range(40):  # 100 episodes
+    for ep in range(25):  # 100 episodes
         jobs.append((std_policy, std_initial_belief, ep))
         jobs.append((fuzzy_policy, fuzzy_initial_belief, ep))
 
@@ -424,8 +437,8 @@ def run_hiv_benchmark_with_ci(args):
 
     for trial in range(args.n_runs):
         print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
-        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=50, seed=42 + trial)
-        train_obs, train_acts = data_gen.generate(n_patients=300)
+        data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=40, seed=42 + trial)
+        train_obs, train_acts = data_gen.generate(n_patients=100)
         data_gen.test = True
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
@@ -447,20 +460,21 @@ def run_hiv_benchmark_with_ci(args):
                 action_mapping=hiv_action_mapping,
                 hyperparameter_update_method="adaptive",
                 obs_var_index=hiv_var_mapping,
-                alpha_ah=0.2,
+                alpha_ah=0.1,
                 use_fuzzy=True,
                 ensure_psd=True,
                 parallel=True,
             )
-            em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
-            em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
-            em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
-            print(f"Standard EM (N={n_train})   -> L1: {em_l1:.3f} | Test LL: {em_ll:.3f}")
 
             fuzzy_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             fuzzy_l1 = compute_avg_l1_error(fuzzy_model, test_obs, test_acts)
             fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)       
             print(f"Fuzzy-MAP EM (N={n_train})  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
+
+            em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
+            em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
+            em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
+            print(f"Standard EM (N={n_train})   -> L1: {em_l1:.3f} | Test LL: {em_ll:.3f}")
 
             # --- RUN PLANNING EVALUATION ---
             eval_env = HIVSimulator(podmp=True, logspace=True)
@@ -474,8 +488,15 @@ def run_hiv_benchmark_with_ci(args):
             )
             return n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret
 
-        config_results = Parallel(n_jobs=-1)(
-            delayed(evaluate_configuration)(n_train, train_obs, train_acts, test_obs, test_acts, trial)
+        def evaluate_configuration_wrapper(n_train, train_obs, train_acts, test_obs, test_acts, trial):
+            from joblib import parallel_backend
+            # Each of the 4 configurations gets an isolated loky pool of 24 workers (4 * 24 = 96 cores)
+            with parallel_backend('loky', n_jobs=24, inner_max_num_threads=1):
+                return evaluate_configuration(n_train, train_obs, train_acts, test_obs, test_acts, trial)
+
+        # Outer loop runs the 4 configurations concurrently
+        config_results = Parallel(n_jobs=len(args.train_sizes), backend='loky')(
+            delayed(evaluate_configuration_wrapper)(n_train, train_obs, train_acts, test_obs, test_acts, trial)
             for n_train in args.train_sizes
         )
 
@@ -571,25 +592,21 @@ def plot_returns_bar_chart(train_sizes, results, save_path='res/cumulative_retur
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
-    parser.add_argument("--n_runs", type=int, default=40, help="Number of independent trials to compute confidence intervals")
+    parser.add_argument("--n_runs", type=int, default=10, help="Number of independent trials to compute confidence intervals")
     parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
     parser.add_argument("--n_states", type=int, default=5, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
-    parser.add_argument("--n_iter", type=int, default=500, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=2, help="Observation fuzzy weight")
+    parser.add_argument("--n_iter", type=int, default=250, help="Maximum EM iterations")
+    parser.add_argument("--lambda_t", type=float, default=5, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=1.5, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
     parser.add_argument("--train_sizes", type=int, nargs='+', default=[10, 15, 20, 25])
     parser.add_argument("--n_test", type=int, default=800)
 
     args = parser.parse_args()
     
-    # Optimize for 96 cores and 200GB RAM:
-    # Use a global loky pool of 96 workers to prevent oversubscription from nested Parallel calls.
-    # inner_max_num_threads=1 prevents Numpy/OpenBLAS from spawning internal threads that conflict with multiprocessing.
-    with parallel_backend('loky', n_jobs=96, inner_max_num_threads=1):
-        results = run_hiv_benchmark_with_ci(args)
+    results = run_hiv_benchmark_with_ci(args)
         
     plot_results_with_ci(args.train_sizes, results)
     plot_returns_bar_chart(args.train_sizes, results)
