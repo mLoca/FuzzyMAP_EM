@@ -120,6 +120,12 @@ class FuzzyPOMDP(PomdpEM):
             for i in range(self.obs_dim):
                 ll *= self._marginal_likelihood(crisp_pred[i], s_prime, i)
             raw_pdfs[s_prime] = ll
+        
+        sum_pdfs = np.sum(raw_pdfs)
+        if sum_pdfs > 1e-12:
+            raw_pdfs /= sum_pdfs
+        else:
+            raw_pdfs = np.ones(self.n_states) / self.n_states
             
         return s, a, overall_match_score, crisp_pred, raw_pdfs
 
