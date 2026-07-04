@@ -2,11 +2,13 @@ import argparse
 import mlflow
 import torch
 import numpy as np
+import logging
 import scipy.stats
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed, parallel_backend
 import random
 from fuzzy.HIV_fuzzy_new import HIVExpertNewModel
+from fuzzy.hiv_fuzzy import HIVExpert5DModel
 
 # Import the custom simulator instead of whynot
 from hiv_simulator import HIVSimulator
@@ -23,6 +25,7 @@ from pathlib import Path
 # ==============================================================================
 
 from POMDPPlanners.planners.mcts_planners.pft_dpw import PFT_DPW
+from POMDPPlanners.planners.mcts_planners.pomcp_dpw import POMCP_DPW
 from POMDPPlanners.planners.mcts_planners.pomcp import POMCP
 from POMDPPlanners.planners.mcts_planners.pomcpow import POMCPOW
 from POMDPPlanners.simulations.episodes import run_episode
@@ -41,10 +44,9 @@ from POMDPPlanners.utils.belief_factory import create_environment_belief
 from POMDPPlanners.simulations.simulation_apis.local_simulations_api import LocalSimulationsAPI
 from POMDPPlanners.core.simulation import EnvironmentRunParams
 from POMDPPlanners.utils.logger import get_logger
-from models.trainable.variational_HMM import VariationalIOHMM
-
 
 POMDPPLANNERS_AVAILABLE = True
+logging.disable(logging.INFO)
 #except ImportError:
 #    POMDPPLANNERS_AVAILABLE = False
 #    print("Warning: POMDPPlanners not found. Planning benchmark will be skipped unless installed.")
@@ -98,12 +100,16 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
     # 1. The Body: Initialize true biological reality (6D array)
     discount_factor = true_env.discount_factor
     initial_state = true_env.initial_state_dist().sample()[0]
-    seed =42 * episode
+    seed = episode
     np.random.seed(seed)
     random.seed(seed)
-    random_noise = np.random.uniform(-0.2, 0.2, size=6)
+    #random_noise = np.random.uniform(-0.01, 0.01, size=6)
+    #random_noise = np.random.uniform(-0.2, 0.01, size=4)
+    #random_noise = np.concatenate((random_noise, np.random.uniform(-0.01, 0.2, size=1)))
+    #random_noise = np.concatenate((random_noise, np.random.uniform(-0.2, 0.01, size=1)))
+    random_noise = np.array([1,1,1,1,-1,1]) * np.random.uniform(0, 0.05, size=1)
     true_env = TrueHIVEnvironment(initial_biological_state=initial_state, discount_factor=discount_factor, p_init=random_noise)
-
+    true_env.logger.disabled = True
     true_state = true_env.initial_state_dist().sample()[0]
     
     # 2. The Brain: Initialize the AI's mental state (over states 0, 1, 2)
@@ -174,19 +180,19 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
         "n_simulations":1000,
         "depth": 3,
         "discount_factor": 0.99,
-        "exploration_constant": 34.80716243797442,
+        "exploration_constant": 5000,
         "k_o": 4.868167504611893,
         "k_a": 4.203111794128549,
         "alpha_o": 0.3982346933640448,
         "alpha_a": 0.46669636595271263,
     }
 
-    std_policy = POMCPOW(std_env,action_sampler=std_sampler, name="POMCP_Standard", **planner_config_std)
+    std_policy = POMCPOW(std_env,action_sampler=fuzzy_sampler, name="POMCP_Standard", **planner_config_std)
     planner_config_fuzzy = {
         "n_simulations":1000,
         "depth": 3,
         "discount_factor": 0.99,
-        "exploration_constant": 58.28369005105695,
+        "exploration_constant": 15000,
         "k_o": 4.571573457147612,
         "k_a": 3.2061026430432484,
         "alpha_o": 0.21689427930779825,
@@ -207,7 +213,8 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
             cache_dir_path=Path("./hyperparameter_results"),
             debug=True)
         # Hyperparamatters optimization
-        for env in [std_env, fuzzy_env]:
+        #[fuzzy_env, std_env]
+        for env in [std_env]:
             initial_belief = std_initial_belief if env.name == "std_env" else fuzzy_initial_belief
             optimization_configs = [
                 HyperParameterRunParams(
@@ -256,7 +263,7 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     print("Evaluating Standard and Fuzzy-MAP EM Models")
     
     jobs = []
-    for ep in range(25):  # 100 episodes
+    for ep in range(15):  # 100 episodes
         jobs.append((std_policy, std_initial_belief, ep))
         jobs.append((fuzzy_policy, fuzzy_initial_belief, ep))
 
@@ -377,16 +384,17 @@ class HIVDatasetGenerator:
         self.env = HIVSimulator(podmp=self.is_pomdp, logspace=True)
         self.env.seed(seed)
         np.random.seed(seed)
-        import random
         random.seed(seed)
 
     def _generate_single_patient(self, patient_seed):
         # Create a fresh thread-safe simulator for each patient
        
         np.random.seed(patient_seed)
-        import random
         random.seed(patient_seed)
-        random_noise = np.random.uniform(-0.2, 0.2, size=6)
+        random_noise = np.random.uniform(-0.2, 0.01, size=4)
+        random_noise = np.concatenate((random_noise, np.random.uniform(-0.01, 0.2, size=1)))
+        random_noise = np.concatenate((random_noise, np.random.uniform(-0.2, 0.01, size=1)))
+        random_noise = np.array([1,1,1,1,-1,1]) * np.random.uniform(0, 0.05, size=1)
         env = HIVSimulator(podmp=self.is_pomdp, logspace=True, p_init=random_noise)
         env.seed(patient_seed)
         
@@ -395,17 +403,17 @@ class HIVDatasetGenerator:
         patient_obs, patient_acts = [], []
 
         for step in range(self.max_steps):
-            noisy_obs = true_state + np.random.normal(0, 0, size=true_state.shape)
+            noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
             patient_obs.append(noisy_obs)
             if self.test:
                 action = 0 if patient_seed % 2 == 0 else 3
             else:
-                action = np.random.randint(0, env.num_actions)
+                action = np.random.choice([0, 1, 2, 3], p=[0.20, 0.30, 0.30, 0.20])
             patient_acts.append(int(action))
             true_state, reward, is_terminal, info = env.step(action)
             if is_terminal: break
         
-        final_noisy_obs = true_state + np.random.normal(0, 0, size=true_state.shape)
+        final_noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
         patient_obs.append(final_noisy_obs)
 
         return patient_obs, patient_acts
@@ -438,16 +446,20 @@ def run_hiv_benchmark_with_ci(args):
     for trial in range(args.n_runs):
         print(f"\n{'='*42}\n       STARTING TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
         data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=40, seed=42 + trial)
-        train_obs, train_acts = data_gen.generate(n_patients=100)
-        data_gen.test = True
+        train_obs, train_acts = data_gen.generate(n_patients=args.train_sizes[-1])
+        data_gen.test = False
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
         def evaluate_configuration(n_train, train_obs, train_acts, test_obs, test_acts, trial):
             print(f"\n--- Evaluating Data Scarcity: N={n_train} ---")
             observations = train_obs[:n_train]
             actions = train_acts[:n_train]
+            seed = trial*n_train
+            random.seed(seed)
+            np.random.seed(seed)
             
-            em_model = POMDP_EM(n_states=args.n_states, n_actions=args.n_actions, obs_dim=args.n_obs_dim, parallel=True)
+            
+            em_model = POMDP_EM(n_states=args.n_states, n_actions=args.n_actions, obs_dim=args.n_obs_dim, parallel=True, seed=seed)
             hiv_var_mapping = {"T1": 0, "T2": 1, "V":  2, "E":  3} 
             
             fuzzy_model = FuzzyMAP_EM(
@@ -460,17 +472,20 @@ def run_hiv_benchmark_with_ci(args):
                 action_mapping=hiv_action_mapping,
                 hyperparameter_update_method="adaptive",
                 obs_var_index=hiv_var_mapping,
-                alpha_ah=0.1,
+                alpha_ah=0.01,
                 use_fuzzy=True,
                 ensure_psd=True,
                 parallel=True,
+                seed=seed
             )
 
+            fuzzy_model.initialize_with_kmeans(observations, seed=seed)
             fuzzy_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             fuzzy_l1 = compute_avg_l1_error(fuzzy_model, test_obs, test_acts)
             fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)       
             print(f"Fuzzy-MAP EM (N={n_train})  -> L1: {fuzzy_l1:.3f} | Test LL: {fuzzy_ll:.3f}")
 
+            em_model.initialize_with_kmeans(observations, seed=seed)
             em_model.fit(observations, actions, max_iterations=args.n_iter, tolerance=1e-4)
             em_l1 = compute_avg_l1_error(em_model, test_obs, test_acts)
             em_ll = compute_log_likelihood(em_model, test_obs, test_acts)
@@ -478,7 +493,7 @@ def run_hiv_benchmark_with_ci(args):
 
             # --- RUN PLANNING EVALUATION ---
             eval_env = HIVSimulator(podmp=True, logspace=True)
-            eval_env.seed(88 + trial)
+            eval_env.seed(42 + trial)
             std_ret, fuzzy_ret = evaluate_planning_performance(
                 true_env=eval_env,
                 em_model=em_model,
@@ -562,9 +577,9 @@ def plot_returns_bar_chart(train_sizes, results, save_path='res/cumulative_retur
     data = []
     for s in train_sizes:
         for val in em_returns_dict.get(s, []):
-            data.append({'Scenario (Training Set Size)': str(s), 'Average Cumulative Return': val, 'Model': 'Standard EM'})
+            data.append({'Training Size': str(s), 'Average Cumulative Return': val, 'Model': 'Standard EM'})
         for val in fuzzy_returns_dict.get(s, []):
-            data.append({'Scenario (Training Set Size)': str(s), 'Average Cumulative Return': val, 'Model': 'Fuzzy-MAP EM'})
+            data.append({'Training Size': str(s), 'Average Cumulative Return': val, 'Model': 'Fuzzy-MAP EM'})
             
     if not data:
         return
@@ -575,12 +590,12 @@ def plot_returns_bar_chart(train_sizes, results, save_path='res/cumulative_retur
     
     # Use seaborn barplot which automatically handles the confidence intervals (95% CI by default)
     sns.barplot(
-        data=df, 
-        x='Scenario (Training Set Size)', 
-        y='Average Cumulative Return', 
-        hue='Model', 
-        capsize=.1,
-        palette={'Standard EM': 'blue', 'Fuzzy-MAP EM': 'orange'},
+        data=df,
+        x='Training Size',
+        y='Average Cumulative Return',
+        hue='Model',
+        capsize=.08,
+        palette={'Standard EM': 'blue', 'Fuzzy-MAP EM': 'red'},
         alpha=0.7
     )
     
@@ -598,9 +613,9 @@ def run_grid_search(args):
     import matplotlib.pyplot as plt
     from joblib import parallel_backend, Parallel, delayed
     
-    lambda_vals = [0, 5, 10, 15, 20, 25]
+    lambda_vals = [0, 0.1, 5, 10]
     n_patients = 15
-    n_trials = 5
+    n_trials = 3
     
     def evaluate_grid_point(lt, lo, trial, train_obs, train_acts, test_obs, test_acts):
         hiv_var_mapping = {"T1": 0, "T2": 1, "V":  2, "E":  3} 
@@ -614,18 +629,54 @@ def run_grid_search(args):
             action_mapping=hiv_action_mapping,
             hyperparameter_update_method="adaptive",
             obs_var_index=hiv_var_mapping,
-            alpha_ah=0.2,
+            alpha_ah=0.05,
+            eb_learning_rate_O=lo,
+            eb_learning_rate_T=lt,
             use_fuzzy=True,
             ensure_psd=True,
             parallel=True,
+            seed=42
         )
         
         fuzzy_model.fit(train_obs, train_acts, max_iterations=args.n_iter, tolerance=1e-4)
         fuzzy_l1 = compute_avg_l1_error(fuzzy_model, test_obs, test_acts)
         fuzzy_ll = compute_log_likelihood(fuzzy_model, test_obs, test_acts)
         
-        print(f"[Trial {trial}] lambda_T={lt}, lambda_O={lo} -> L1={fuzzy_l1:.3f}, LL={fuzzy_ll:.3f}")
-        return {'lambda_t': lt, 'lambda_o': lo, 'trial': trial, 'L1': fuzzy_l1, 'LL': fuzzy_ll}
+        discount_factor = 0.99
+        fuzzy_params = {
+            "T": fuzzy_model.transitions,
+            "mu": fuzzy_model.obs_means,
+            "Sigma": fuzzy_model.obs_covs
+        }
+        fuzzy_env = LearnedHIVEnvironment("fuzzy_env", fuzzy_params, my_hiv_reward_fn, discount_factor=discount_factor)
+        fuzzy_sampler = DiscreteActionSampler(fuzzy_env.get_actions())
+        
+        planner_config = {
+            "n_simulations":1000,
+            "depth": 3,
+            "discount_factor": 0.95,
+            "exploration_constant": 10000,
+            "k_o": 4.868167504611893,
+            "k_a": 4.203111794128549,
+            "alpha_o": 0.3982346933640448,
+            "alpha_a": 0.46669636595271263,
+        }
+        
+        fuzzy_policy = POMCPOW(fuzzy_env, action_sampler=fuzzy_sampler, name="POMCP_Fuzzy", **planner_config)
+        fuzzy_initial_belief = get_initial_belief(fuzzy_env, n_particles=50)  # Reduced particles
+        
+        unhealthy_steady_state = [163573., 5., 11945., 46., 63919., 24.]
+        eval_env = TrueHIVEnvironment(initial_biological_state=unhealthy_steady_state, discount_factor=discount_factor)
+        
+        episode_returns = []
+        for ep in range(5):  # Run 5 episodes to estimate policy reward
+            ret, _, _ = evaluate_cross_environment(eval_env, fuzzy_policy, fuzzy_initial_belief, episode=ep)
+            episode_returns.append(ret)
+            
+        mean_reward = np.mean(episode_returns)
+        
+        print(f"[Trial {trial}] lambda_T={lt}, lambda_O={lo} -> L1={fuzzy_l1:.3f}, LL={fuzzy_ll:.3f}, Reward={mean_reward:.2f}")
+        return {'lambda_t': lt, 'lambda_o': lo, 'trial': trial, 'L1': fuzzy_l1, 'LL': fuzzy_ll, 'Reward': mean_reward}
 
     def evaluate_wrapper(lt, lo, trial, train_obs, train_acts, test_obs, test_acts):
         with parallel_backend('loky', n_jobs=24, inner_max_num_threads=1):
@@ -653,12 +704,23 @@ def run_grid_search(args):
     )
     
     df = pd.DataFrame(out)
+
+    mean_df = df.groupby(['lambda_t', 'lambda_o'])[['L1', 'LL', 'Reward']].mean().reset_index()
     
-    mean_df = df.groupby(['lambda_t', 'lambda_o'])[['L1', 'LL']].mean().reset_index()
+    # Identify the best hyperparameter configuration by average reward
+    best_idx = mean_df['Reward'].idxmax()
+    best_config = mean_df.loc[best_idx]
+    print(f"\n{'='*40}\n   BEST CONFIGURATION BY REWARD:\n"
+          f"   lambda_T: {best_config['lambda_t']}\n"
+          f"   lambda_O: {best_config['lambda_o']}\n"
+          f"   Best Mean Reward: {best_config['Reward']:.2f}\n"
+          f"   Corresponding L1: {best_config['L1']:.3f}\n"
+          f"   {'='*40}\n")
     pivot_l1 = mean_df.pivot(index='lambda_t', columns='lambda_o', values='L1')
     pivot_ll = mean_df.pivot(index='lambda_t', columns='lambda_o', values='LL')
+    pivot_reward = mean_df.pivot(index='lambda_t', columns='lambda_o', values='Reward')
     
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 3, figsize=(21, 6))
     sns.heatmap(pivot_l1, annot=True, cmap='viridis_r', ax=axes[0], fmt=".3f")
     axes[0].set_title('Grid Search: Average L1 Error')
     axes[0].set_xlabel('Lambda_O')
@@ -669,6 +731,11 @@ def run_grid_search(args):
     axes[1].set_xlabel('Lambda_O')
     axes[1].set_ylabel('Lambda_T')
     
+    sns.heatmap(pivot_reward, annot=True, cmap='viridis', ax=axes[2], fmt=".2f")
+    axes[2].set_title('Grid Search: Average Reward')
+    axes[2].set_xlabel('Lambda_O')
+    axes[2].set_ylabel('Lambda_T')
+
     plt.tight_layout()
     plt.savefig('res/grid_search_heatmaps.png', dpi=300)
     print("Grid search complete. Heatmaps saved to res/grid_search_heatmaps.png")
@@ -678,18 +745,20 @@ def run_grid_search(args):
 
 
 if __name__ == "__main__":
+
+
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
-    parser.add_argument("--n_runs", type=int, default=10, help="Number of independent trials to compute confidence intervals")
+    parser.add_argument("--n_runs", type=int, default=3, help="Number of independent trials to compute confidence intervals")
     parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
     parser.add_argument("--n_states", type=int, default=5, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=250, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=5, help="Transition fuzzy weight")
-    parser.add_argument("--lambda_o", type=float, default=1.5, help="Observation fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_o", type=float, default=0.1, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[10, 15, 20, 25])
-    parser.add_argument("--n_test", type=int, default=800)
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20, 25, 30, 35])
+    parser.add_argument("--n_test", type=int, default=200)
     parser.add_argument("--grid_search", action="store_true", help="Run hyperparameter grid search for lambda_T and lambda_O")
 
     args = parser.parse_args()

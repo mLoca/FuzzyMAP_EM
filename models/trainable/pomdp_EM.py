@@ -26,6 +26,9 @@ class PomdpEM:
         self.n_actions = n_actions
         self.obs_dim = obs_dim
 
+        np.random.seed(seed)
+        random.seed(seed)
+
         # Initialize model parameters
         self.transitions = np.ones((n_states, n_actions, n_states)) / n_states  # P(s'|s,a)
         self.initial_prob = np.ones(n_states) / n_states  # P(s_0)
@@ -39,10 +42,7 @@ class PomdpEM:
         self.ensure_psd = ensure_psd
         self.verbose = verbose
 
-        np.random.seed(seed)
-        random.seed(seed)
-
-    def initialize_with_kmeans(self, observations):
+    def initialize_with_kmeans(self, observations, seed = 0):
         """
         Initializes observation model means using K-Means clustering.
         """

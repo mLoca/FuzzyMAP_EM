@@ -25,8 +25,9 @@ class TrueHIVEnvironment(Environment):
         # Instantiate ONE internal simulator for this environment
         # (This is thread-safe for Joblib parallelization)
         if p_init is not None:
-            self.sim = HIVSimulator(logspace=True, p_init=p_init, perturb_params=True)
-            self.sim.reset()
+            self.sim = HIVSimulator(logspace=True, p_init=p_init)
+            self.sim.reset(perturb_params=True)
+            self.initial_biological_state = self.sim.state
         else:   
             self.sim = HIVSimulator(logspace=True)
             self.sim.reset()
@@ -77,9 +78,8 @@ class TrueHIVEnvironment(Environment):
         
         # Standardize using the same scalars as HIVSimulator
         standardized_obs = (log_state[mask] - empirical_mean[mask]) / empirical_std[mask]
-        
-        # Emulate clinical noise (matches training set args.noise = 0.1)
-        obs = standardized_obs + np.random.normal(0, 0.001, size=standardized_obs.shape)
+
+        obs = standardized_obs
         
         return tuple(obs)
 

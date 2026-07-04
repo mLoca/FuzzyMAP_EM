@@ -35,13 +35,13 @@ class HIVExpertNewModel:
 #
         #Fuzzy rule definition for T1
         T1_0 = FuzzySet(points=[[-4.805361, 1], [-4.021433, 1], [-3.237506, 0], [3.033915, 0]], term='Depleted')
-        T1_1 = FuzzySet(points=[[-4.805361, 0], [-4.021433, 0], [-3.237506, 1], [-1.669651, 1], [0.682132, 0], [3.033915, 0]], term='Partially_depleted')
-        T1_2 = FuzzySet(points=[[-4.805361, 0], [-1.669651, 0], [0.682132, 1], [3.033915, 1]], term='Abundant')
+        T1_1 = FuzzySet(points=[[-4.805361, 0], [-4.021433, 0], [-3.237506, 1], [-1.669651, 1], [2.249987, 0], [3.033915, 0]], term='Partially_depleted')
+        T1_2 = FuzzySet(points=[[-4.805361, 0], [-1.669651, 0], [2.249987, 1], [3.033915, 1]], term='Abundant')
         self.FS.add_linguistic_variable('T1', LinguisticVariable([T1_0,T1_1,T1_2], concept='T1'))
         #Fuzzy rule definition for T1_inf
         T1_inf_0 = FuzzySet(points=[[-4.21446, 1], [-3.612037, 1], [-3.009614, 0], [1.80977, 0]], term='Depleted')
-        T1_inf_1 = FuzzySet(points=[[-4.21446, 0], [-3.612037, 0], [-3.009614, 1], [-1.804768, 1], [0.002501, 0], [1.80977, 0]], term='Partially_depleted')
-        T1_inf_2 = FuzzySet(points=[[-4.21446, 0], [-1.804768, 0], [0.002501, 1], [1.80977, 1]], term='Abundant')
+        T1_inf_1 = FuzzySet(points=[[-4.21446, 0], [-3.612037, 0], [-3.009614, 1], [-1.804768, 1], [ 1.207347, 0], [1.80977, 0]], term='Partially_depleted')
+        T1_inf_2 = FuzzySet(points=[[-4.21446, 0], [-1.804768, 0], [ 1.207347, 1], [1.80977, 1]], term='Abundant')
         self.FS.add_linguistic_variable('T1_inf', LinguisticVariable([T1_inf_0,T1_inf_1,T1_inf_2], concept='T1_inf'))
         #Fuzzy rule definition for T2
         T2_0 = FuzzySet(points=[[-2.994877, 1], [1.617038, 1], [2.193527, 0], [2.770016, 0]], term='Low')
@@ -88,7 +88,7 @@ class HIVExpertNewModel:
         #Define rules for T1
         #RULES.append('IF (T1p IS High) THEN (T1 IS T1_Abundant)')
         #RULES.append('IF (T1p IS Low) THEN (T1 IS T1_Depleted)')
-        #RULES.append('IF (V IS High) THEN (T1 IS T1_Partially_depleted)')
+        #RULES.append('IF (V IS High) THEN (T1 IS Partially_depleted)')
 
         
         #Define rules for T1_inf
@@ -102,7 +102,7 @@ class HIVExpertNewModel:
         #Define rules for T2
         #RULES.append('IF (T2p IS High) THEN (T2 IS T2_High)')
         #RULES.append('IF (T2p IS Low) THEN (T2 IS T2_Low)')
-        #RULES.append('IF (V IS High) THEN (T2 IS T2_Low)')
+        #RULES.append('IF (V IS High) THEN (T2 IS Low)')
         
         #Define rules for T2_inf
         RULES.append('IF (V IS High) THEN (T2_inf IS High)')
@@ -112,16 +112,16 @@ class HIVExpertNewModel:
         RULES.append('IF (e1 IS On) THEN (T2_inf IS Low)')
         
         #Define rules for V
-        RULES.append('IF (T1_inf IS Abundant) OR (T1_inf IS Partially_depleted) OR (T2_inf IS High) THEN (V IS High)')
-        RULES.append('IF (T1_inf IS Depleted) AND (T2_inf IS Low) THEN (V IS Low)')
-        RULES.append('IF (e2 IS On) THEN (V IS Low)')
+        RULES.append('IF (T1_inf IS Abundant) OR (T1_inf IS Partially_depleted) OR (T2_inf IS High) THEN (next_V IS High)')
+        RULES.append('IF (T1_inf IS Depleted) AND (T2_inf IS Low) THEN (next_V IS Low)')
+        RULES.append('IF (e2 IS On) THEN (next_V IS Low)')
         
         #Define rules for E
-        RULES.append('IF (T1_inf IS Abundant) THEN (E IS Low)')
-        RULES.append('IF (T1_inf IS Partially_depleted) THEN (E IS High)')
-        RULES.append('IF (T1_inf IS Depleted) THEN (E IS Low)')
-        RULES.append('IF (V IS High) THEN (E IS Low)')
-        RULES.append('IF (V IS Low) THEN (E IS High)')
+        RULES.append('IF (T1_inf IS Abundant) THEN (next_E IS Low)')
+        RULES.append('IF (T1_inf IS Partially_depleted) THEN (next_E IS High)')
+        RULES.append('IF (T1_inf IS Depleted) THEN (next_E IS Low)')
+        RULES.append('IF (V IS High) THEN (next_E IS Low)')
+        RULES.append('IF (V IS Low) THEN (next_E IS High)')
         
         #add fuzzy rules
         self.FS.add_rules(RULES)

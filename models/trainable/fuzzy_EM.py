@@ -327,13 +327,13 @@ class FuzzyPOMDP(PomdpEM):
 
         if self.parallel:
             results = Parallel(n_jobs=-1)(
-                delayed(_process_single_sa)(self, s, a, rules)
+                delayed(self._process_single_sa)(s, a, rules)
                 for s in range(self.n_states)
                 for a in range(self.n_actions)
             )
         else:
             results = [
-                _process_single_sa(self, s, a, rules)
+                self._process_single_sa(s, a, rules)
                 for s in range(self.n_states)
                 for a in range(self.n_actions)
             ]
@@ -348,7 +348,7 @@ class FuzzyPOMDP(PomdpEM):
                 
                 pseudo_count_O_den[s_prime] += strength
                 pseudo_count_O_mean[s_prime, :] += strength * crisp_pred
-                pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 0.05)
+                pseudo_count_O_cov[s_prime, :, :] += strength * (np.outer(crisp_pred, crisp_pred) + np.eye(self.obs_dim) * 1e-6)
                 
                 pseudo_count_T[s, a, s_prime] += overall_match_score * raw_pdfs[s_prime]
 
