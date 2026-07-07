@@ -361,14 +361,15 @@ def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewar
             fuz_mean = np.nanmean(fuzzy_states_padded[:, :, i], axis=0)
             fuz_std = np.nanstd(fuzzy_states_padded[:, :, i], axis=0)
         
-        axes[i].plot(std_mean, label='Standard EM', color='blue')
-        axes[i].fill_between(range(len(std_mean)), std_mean - std_std, std_mean + std_std, alpha=0.2, color='blue')
+        days = np.arange(len(std_mean)) * 5
+        axes[i].plot(days, std_mean, label='Standard EM', color='blue')
+        axes[i].fill_between(days, std_mean - std_std, std_mean + std_std, alpha=0.2, color='blue')
         
-        axes[i].plot(fuz_mean, label='Fuzzy-MAP EM', color='orange')
-        axes[i].fill_between(range(len(fuz_mean)), fuz_mean - fuz_std, fuz_mean + fuz_std, alpha=0.2, color='orange')
+        axes[i].plot(days, fuz_mean, label='Fuzzy-MAP EM', color='orange')
+        axes[i].fill_between(days, fuz_mean - fuz_std, fuz_mean + fuz_std, alpha=0.2, color='orange')
         
         axes[i].set_title(state_labels[i])
-        axes[i].set_xlabel('Time Steps')
+        axes[i].set_xlabel('Days')
         axes[i].set_ylabel('Log10(Cell Count / Virus Load)')
         if i == 0:
             axes[i].legend()
@@ -379,14 +380,15 @@ def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewar
         fuz_r_mean = np.nanmean(fuzzy_rewards_padded, axis=0)
         fuz_r_std = np.nanstd(fuzzy_rewards_padded, axis=0)
     
-    axes[6].plot(std_r_mean, label='Standard EM', color='blue')
-    axes[6].fill_between(range(len(std_r_mean)), std_r_mean - std_r_std, std_r_mean + std_r_std, alpha=0.2, color='blue')
+    days_r = np.arange(len(std_r_mean)) * 5
+    axes[6].plot(days_r, std_r_mean, label='Standard EM', color='blue')
+    axes[6].fill_between(days_r, std_r_mean - std_r_std, std_r_mean + std_r_std, alpha=0.2, color='blue')
     
-    axes[6].plot(fuz_r_mean, label='Fuzzy-MAP EM', color='orange')
-    axes[6].fill_between(range(len(fuz_r_mean)), fuz_r_mean - fuz_r_std, fuz_r_mean + fuz_r_std, alpha=0.2, color='orange')
+    axes[6].plot(days_r, fuz_r_mean, label='Fuzzy-MAP EM', color='orange')
+    axes[6].fill_between(days_r, fuz_r_mean - fuz_r_std, fuz_r_mean + fuz_r_std, alpha=0.2, color='orange')
     
     axes[6].set_title("Reward")
-    axes[6].set_xlabel('Time Steps')
+    axes[6].set_xlabel('Days')
     axes[6].set_ylabel('Reward')
     
     axes[7].axis('off')
