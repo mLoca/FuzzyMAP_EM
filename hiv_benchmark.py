@@ -93,29 +93,49 @@ class TrueHIVEnvironmentWrapper:
             cov=np.eye(len(next_state)) * 0.05**2
         )
 
-def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=40):
+def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, max_steps=40, trial=0):
     """
     Evaluates a policy trained on a Learned Environment inside a True Environment.
     """
     # 1. The Body: Initialize true biological reality (6D array)
     discount_factor = true_env.discount_factor
     initial_state = true_env.initial_state_dist().sample()[0]
-    seed = episode
+    seed = trial * 100 + episode
     np.random.seed(seed)
     random.seed(seed)
     #random_noise = np.random.uniform(-0.01, 0.01, size=6)
     #random_noise = np.random.uniform(-0.2, 0.01, size=4)
     #random_noise = np.concatenate((random_noise, np.random.uniform(-0.01, 0.2, size=1)))
     #random_noise = np.concatenate((random_noise, np.random.uniform(-0.2, 0.01, size=1)))
-    random_noise = np.array([1,1,1,1,-1,1]) * np.random.uniform(0, 0.05, size=1)
+    random_noise = np.array([1,1,1,1,-1,1]) * np.random.uniform(0, 0.2, size=1)
     true_env = TrueHIVEnvironment(initial_biological_state=initial_state, discount_factor=discount_factor, p_init=random_noise)
     true_env.logger.disabled = True
     true_state = true_env.initial_state_dist().sample()[0]
     
-    # 2. The Brain: Initialize the AI's mental state (over states 0, 1, 2)
-    # We use .copy() so parallel episodes don't share the same memory
-    import copy
-    belief = copy.deepcopy(initial_belief)
+
+    obs_0 = true_env.sample_observation(true_state, action=0)  # action=0 is a dummy
+    
+    # B. Extract the model's learned observation parameters (mu and Sigma)
+    model_env = policy.environment  # This is std_env or fuzzy_env (LearnedHIVEnvironment)
+    
+    # C. Compute the likelihood of obs_0 under each of the 5 abstract states
+    likelihoods = []
+    for s in range(model_env.n_states):
+        mean = model_env.mu[s]
+        cov = model_env.Sigma[s]
+        # Add a tiny epsilon to the diagonal of the covariance matrix for numerical stability
+        cov_safe = cov + np.eye(len(mean)) * 1e-6
+        likelihood = scipy.stats.multivariate_normal.pdf(obs_0, mean=mean, cov=cov_safe)
+        likelihoods.append(likelihood)
+        
+    best_state = np.argmax(likelihoods)
+    
+    # D. Create a WeightedParticleBelief where all particles are initialized to the best_state (probability = 1.0)
+    from POMDPPlanners.core.belief import WeightedParticleBelief
+    n_particles = 100
+    particles = np.full(n_particles, best_state, dtype=int)
+    log_weights = np.log(np.ones(n_particles) / n_particles)
+    belief = WeightedParticleBelief(particles=particles, log_weights=log_weights, resampling=True)
     
     total_reward = 0.0
     
@@ -128,7 +148,10 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
         except AttributeError:
             action = policy.action(belief)
         
-        action = action[0][0]
+        if step == 0:
+            action = 0
+        else:
+            action = action[0][0]
 
         next_true_state = true_env.sample_next_state(true_state, action)
 
@@ -151,7 +174,7 @@ def evaluate_cross_environment(true_env, policy, initial_belief, episode = 1, ma
         
     return total_reward, np.array(states_history), np.array(rewards_history)
 
-def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50, horizon=15, hyper_optimize=False):
+def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50, horizon=15, hyper_optimize=False, trial=0):
     std_params = {
         "T": em_model.transitions,          
         "mu": em_model.obs_means,     
@@ -204,7 +227,8 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     # 3. Setup Initial Beliefs (e.g., Uniform particle belief)
     # You can customize this based on the POMDPPlanners documentation
     std_initial_belief = get_initial_belief(std_env, n_particles=100)
-    fuzzy_initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
+    #fuzzy_initial_belief = get_initial_belief(fuzzy_env, n_particles=100)
+    fuzzy_initial_belief = std_initial_belief  # For simplicity, using the same initial belief for both
 
     # 4. Run the Evaluation
     if hyper_optimize:
@@ -263,12 +287,12 @@ def evaluate_planning_performance(true_env, em_model, fuzzy_model, n_episodes=50
     print("Evaluating Standard and Fuzzy-MAP EM Models")
     
     jobs = []
-    for ep in range(15):  # 100 episodes
+    for ep in range(30):  
         jobs.append((std_policy, std_initial_belief, ep))
         jobs.append((fuzzy_policy, fuzzy_initial_belief, ep))
 
     all_results = Parallel(n_jobs=-1)(
-        delayed(evaluate_cross_environment)(true_env, pol, belief, episode=ep) 
+        delayed(evaluate_cross_environment)(true_env, pol, belief, episode=ep, trial=trial) 
         for pol, belief, ep in jobs
     )
     
@@ -394,7 +418,7 @@ class HIVDatasetGenerator:
         random_noise = np.random.uniform(-0.2, 0.01, size=4)
         random_noise = np.concatenate((random_noise, np.random.uniform(-0.01, 0.2, size=1)))
         random_noise = np.concatenate((random_noise, np.random.uniform(-0.2, 0.01, size=1)))
-        random_noise = np.array([1,1,1,1,-1,1]) * np.random.uniform(0, 0.05, size=1)
+        random_noise = np.array([1,1,1,1,-1,1]) * np.random.uniform(0, 0.2, size=1)
         env = HIVSimulator(podmp=self.is_pomdp, logspace=True, p_init=random_noise)
         env.seed(patient_seed)
         
@@ -405,10 +429,13 @@ class HIVDatasetGenerator:
         for step in range(self.max_steps):
             noisy_obs = true_state + np.random.normal(0, self.noise_std, size=true_state.shape)
             patient_obs.append(noisy_obs)
-            if self.test:
-                action = 0 if patient_seed % 2 == 0 else 3
+            if step != 0:
+                if self.test:
+                    action = 0 if patient_seed % 2 == 0 else 3
+                else:
+                    action = np.random.choice([0, 1, 2, 3], p=[0.25, 0.25, 0.25, 0.25])
             else:
-                action = np.random.choice([0, 1, 2, 3], p=[0.20, 0.30, 0.30, 0.20])
+                action = 0
             patient_acts.append(int(action))
             true_state, reward, is_terminal, info = env.step(action)
             if is_terminal: break
@@ -440,7 +467,11 @@ def run_hiv_benchmark_with_ci(args):
             'Fuzzy_LL': {s: [] for s in args.train_sizes},
             'Pyro_LL': {s: [] for s in args.train_sizes},
             'EM_Return': {s: [] for s in args.train_sizes},
-            'Fuzzy_Return': {s: [] for s in args.train_sizes}
+            'Fuzzy_Return': {s: [] for s in args.train_sizes},
+            'EM_obs_means': {s: [] for s in args.train_sizes},
+            'Fuzzy_obs_means': {s: [] for s in args.train_sizes},
+            'EM_transitions': {s: [] for s in args.train_sizes},
+            'Fuzzy_transitions': {s: [] for s in args.train_sizes},
         }
 
     for trial in range(args.n_runs):
@@ -448,6 +479,7 @@ def run_hiv_benchmark_with_ci(args):
         data_gen = HIVDatasetGenerator(is_pomdp=True, noise_std=args.noise, max_steps=40, seed=42 + trial)
         train_obs, train_acts = data_gen.generate(n_patients=args.train_sizes[-1])
         data_gen.test = False
+        data_gen.seed = 1000 + trial
         test_obs, test_acts = data_gen.generate(n_patients=args.n_test)
 
         def evaluate_configuration(n_train, train_obs, train_acts, test_obs, test_acts, trial):
@@ -499,9 +531,10 @@ def run_hiv_benchmark_with_ci(args):
                 em_model=em_model,
                 fuzzy_model=fuzzy_model,
                 n_episodes=20,
-                horizon=10
+                horizon=10,
+                trial=trial
             )
-            return n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret
+            return n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret, em_model, fuzzy_model
 
         def evaluate_configuration_wrapper(n_train, train_obs, train_acts, test_obs, test_acts, trial):
             from joblib import parallel_backend
@@ -515,13 +548,23 @@ def run_hiv_benchmark_with_ci(args):
             for n_train in args.train_sizes
         )
 
-        for n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret in config_results:
+        for n_train, em_l1, em_ll, fuzzy_l1, fuzzy_ll, std_ret, fuzzy_ret, em_model, fuzzy_model in config_results:
             results['EM_L1'][n_train].append(em_l1)
             results['Fuzzy_L1'][n_train].append(fuzzy_l1)
             results['EM_LL'][n_train].append(em_ll)
             results['Fuzzy_LL'][n_train].append(fuzzy_ll)
             results['EM_Return'][n_train].extend(std_ret)
             results['Fuzzy_Return'][n_train].extend(fuzzy_ret)
+            results['EM_obs_means'][n_train].append(em_model.obs_means)
+            results['Fuzzy_obs_means'][n_train].append(fuzzy_model.obs_means)
+            results["EM_transitions"][n_train].append(em_model.transitions)
+            results["Fuzzy_transitions"][n_train].append(fuzzy_model.transitions)
+    for trial in range(args.n_runs):
+        print(f"\n{'='*42}\n       MEAN and Transitions TRIAL {trial + 1}/{args.n_runs}\n{'='*42}")
+        print(f"EM_obs_means: {results['EM_obs_means']}")
+        print(f"Fuzzy_obs_means: {results['Fuzzy_obs_means']}")
+        print(f"EM_transitions: {results['EM_transitions']}")
+        print(f"Fuzzy_transitions: {results['Fuzzy_transitions']}")
 
     return results
 
@@ -670,7 +713,7 @@ def run_grid_search(args):
         
         episode_returns = []
         for ep in range(5):  # Run 5 episodes to estimate policy reward
-            ret, _, _ = evaluate_cross_environment(eval_env, fuzzy_policy, fuzzy_initial_belief, episode=ep)
+            ret, _, _ = evaluate_cross_environment(eval_env, fuzzy_policy, fuzzy_initial_belief, episode=ep, trial = trial)
             episode_returns.append(ret)
             
         mean_reward = np.mean(episode_returns)
@@ -679,7 +722,7 @@ def run_grid_search(args):
         return {'lambda_t': lt, 'lambda_o': lo, 'trial': trial, 'L1': fuzzy_l1, 'LL': fuzzy_ll, 'Reward': mean_reward}
 
     def evaluate_wrapper(lt, lo, trial, train_obs, train_acts, test_obs, test_acts):
-        with parallel_backend('loky', n_jobs=24, inner_max_num_threads=1):
+        with parallel_backend('loky', n_jobs=30, inner_max_num_threads=1):
             return evaluate_grid_point(lt, lo, trial, train_obs, train_acts, test_obs, test_acts)
 
     trial_data = {}
@@ -695,7 +738,7 @@ def run_grid_search(args):
     grid = list(itertools.product(lambda_vals, lambda_vals, range(n_trials)))
     
     print(f"\n{'='*40}\n   STARTING GRID SEARCH ({len(grid)} tasks)\n{'='*40}")
-    out = Parallel(n_jobs=4, backend='loky')(
+    out = Parallel(n_jobs=3, backend='loky')(
         delayed(evaluate_wrapper)(
             lt, lo, trial, 
             trial_data[trial][0], trial_data[trial][1], 
@@ -748,16 +791,16 @@ if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser(description="Run Statistical HIV Benchmark for Fuzzy-MAP EM")
-    parser.add_argument("--n_runs", type=int, default=3, help="Number of independent trials to compute confidence intervals")
+    parser.add_argument("--n_runs", type=int, default=15, help="Number of independent trials to compute confidence intervals")
     parser.add_argument("--run_planning", action="store_true", help="Run POMDPPlanners evaluation to compare accumulated returns")
     parser.add_argument("--n_states", type=int, default=5, help="Discrete latent phases")
     parser.add_argument("--n_actions", type=int, default=4, help="0: None, 1: RTI, 2: PI, 3: Both")
     parser.add_argument("--n_obs_dim", type=int, default=4, help="Masked observations (T1, T2, Viral Load, E)")
     parser.add_argument("--n_iter", type=int, default=250, help="Maximum EM iterations")
-    parser.add_argument("--lambda_t", type=float, default=10, help="Transition fuzzy weight")
+    parser.add_argument("--lambda_t", type=float, default=6, help="Transition fuzzy weight")
     parser.add_argument("--lambda_o", type=float, default=0.1, help="Observation fuzzy weight")
     parser.add_argument("--noise", type=float, default=0.1, help="Gaussian noise added to standardized observations")
-    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20, 25, 30, 35])
+    parser.add_argument("--train_sizes", type=int, nargs='+', default=[20, 25, 30])
     parser.add_argument("--n_test", type=int, default=200)
     parser.add_argument("--grid_search", action="store_true", help="Run hyperparameter grid search for lambda_T and lambda_O")
 
@@ -769,3 +812,4 @@ if __name__ == "__main__":
         results = run_hiv_benchmark_with_ci(args)
         plot_results_with_ci(args.train_sizes, results)
         plot_returns_bar_chart(args.train_sizes, results)
+        
