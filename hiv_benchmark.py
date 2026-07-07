@@ -352,7 +352,7 @@ def plot_patient_trajectories(std_states, std_rewards, fuzzy_states, fuzzy_rewar
     
     fig, axes = plt.subplots(4, 2, figsize=(15, 12))
     axes = axes.flatten()
-    state_labels = ["T1 (Uninfected CD4)", "T2 (Infected CD4)", "T1* (Uninfected Macrophages)", "T2* (Infected Macrophages)", "V (Free Virus)", "E (Immune Response)"]
+    state_labels = ["T1 (Uninfected CD4)", "T2 (Uninfected Macrophages)", "T1* (Infected CD4)", "T2* (Infected Macrophages)", "V (Free Virus)", "E (Immune Response)"]
     
     for i in range(6):
         with np.errstate(all='ignore'):
