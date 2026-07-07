@@ -281,7 +281,7 @@ def _instantiate_model_from_config(model_config, env, fuzzy_model, seed):
     return model
 
 
-def _check_cache(config_models, env_config, exp_id, data_size, noise_sd, trial, cache_dir,
+def _check_cache(config_models, env_config, exp_id, data_size, noise_sd, expert_noise, trial, cache_dir,
                  use_cache, verbose):
     """
     Checks for existing cached results and returns models that need to be run.
@@ -294,7 +294,7 @@ def _check_cache(config_models, env_config, exp_id, data_size, noise_sd, trial, 
             model_name = model_name.replace("/", "_").replace(" ", "_").replace("=", "")
 
             # Safe filename generation
-            filename = f"sz{data_size}_ns{noise_sd}_tr{trial}.pkl"
+            filename = f"sz{data_size}_ns{noise_sd}_en{expert_noise}_tr{trial}.pkl"
             file_path = f"{exp_id}/{env_config['name']}/{model_name}/"
             dir_path = os.path.join(cache_dir, file_path)
             if not os.path.exists(dir_path):
@@ -359,7 +359,7 @@ def _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model, seed, s
         return None
 
 
-def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models, standard_param,
+def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd, expert_noise, seed, config_models, standard_param,
                       use_cache=True, verbose=False, cache_dir="res/cache/"):
     """
     Generates ONE dataset for this run_id/size.
@@ -376,7 +376,7 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
 
     current_seed = seed + trial
 
-    models_to_run, cached_results = _check_cache(config_models, env_config, exp_id, data_size, noise_sd, trial,
+    models_to_run, cached_results = _check_cache(config_models, env_config, exp_id, data_size, noise_sd, expert_noise, trial,
                                                  cache_dir, use_cache, verbose)
     if len(models_to_run) == 0:
         return cached_results
@@ -388,7 +388,7 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
         
     obs, acts = env.generate_data(data_size, seq_length, noise_sd, seed=current_seed)
 
-    fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed)
+    fuzzy_model = build_fuzzymodel(env.pomdp, seed=current_seed, noise=expert_noise)
 
     np.random.seed(current_seed)
     random.seed(current_seed)
@@ -408,6 +408,7 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
                 "data_size": data_size,
                 "sequence_length": seq_length,
                 "noise_sd": noise_sd,
+                "expert_noise": expert_noise,
                 "trial": trial,
                 "final_log_likelihood": fit_ll,
                 "training_time_sec": elapsed_time,
@@ -456,6 +457,7 @@ def main():
         n_trials = exp_config["n_trials"]
         noise_levels = exp_config["noise_level"]
         dataset_sizes = exp_config["dataset_sizes"]
+        expert_noise_levels = exp_config.get("expert_noise_levels", [0.0])
         standard_params = exp_config.get("standard_params", {})
 
         tasks = []
@@ -468,13 +470,14 @@ def main():
             env_config = all_environments[env_name]
             results_summary[exp_id][env_name] = {}
 
-            # One task per (Dataset Size,  noise_level,  n_trial)
+            # One task per (Dataset Size,  noise_level, expert_noise, n_trial)
             # Each task will run ALL batch_configs on that specific dataset
             for data_size in dataset_sizes:
                 for noise_sd in noise_levels:
-                    for trial in range(n_trials):
-                        tasks.append((exp_id, trial, env_config, data_size, seq_length, noise_sd, seed, config_models,
-                                      standard_params, use_cache, verbose))
+                    for expert_noise in expert_noise_levels:
+                        for trial in range(n_trials):
+                            tasks.append((exp_id, trial, env_config, data_size, seq_length, noise_sd, expert_noise, seed, config_models,
+                                          standard_params, use_cache, verbose))
 
         all_batch_results = []
         if not (global_settings.get("parallel_execution", False)):
@@ -529,6 +532,28 @@ def main():
                     title=f"Adaptive Sensitivity: KL Divergence vs Alpha", vmax=12, vmin=0,
                     folder_name="res/adaptive_alpha_search/"
                 )
+            elif "expert_knowledge_robustness" in exp_id:
+                print(f" Environment: {env_name}")
+                dataset_sizes_unique = sorted({res['data_size'] for results in model_results.values() for res in results})
+                
+                from utils.metrics import visualize_expert_noise_L1_trials, visualize_expert_noise_KL_trials
+                for size in dataset_sizes_unique:
+                    print(f"  Data Size: {size}")
+                    filtered_results = {}
+                    for model_name, results in model_results.items():
+                        filtered = [r for r in results if r['data_size'] == size]
+                        if filtered:
+                            filtered_results[model_name] = filtered
+
+                    visualize_expert_noise_L1_trials(filtered_results, data_size=size, env_name=env_name, folder_name=folder_name)
+                    visualize_expert_noise_KL_trials(filtered_results, data_size=size, env_name=env_name, folder_name=folder_name)
+                    
+                    for model_name, results in filtered_results.items():
+                        print(f"  Model: {model_name}")
+                        for res in results:
+                            print(f"   Expert Noise: {res['expert_noise']}, Trial: {res['trial']}, "
+                                  f"Final LL: {res['final_log_likelihood']:.2f}, "
+                                  f"Metrics: {res['metrics']}")
             else:
                 print(f" Environment: {env_name}")
                 noise_levels = sorted({res['noise_sd'] for results in model_results.values() for res in results})

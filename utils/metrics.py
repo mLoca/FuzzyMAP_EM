@@ -295,7 +295,117 @@ def visualize_KL_trials(results, noise_level='', env_name='',  folder_name=''):
                frameon=True,
                loc='upper right',
                framealpha=0.8)
-    path =  path = folder_name + "KL_divergence_" + env_name + '_SD' + str(noise_level) + '.png'
+    path = folder_name + "KL_divergence_" + env_name + '_SD' + str(noise_level) + '.png'
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.05, dpi=300)
+    plt.tight_layout()
+    plt.show()
+
+def visualize_expert_noise_L1_trials(results, data_size=0.0, env_name='', folder_name=''):
+    sns.set_theme(style="whitegrid", context="talk",
+                  rc={
+                      "grid.color": ".9",
+                      "grid.linewidth": 1.0,
+                      "axes.edgecolor": ".3",
+                      "axes.linewidth": 0.8,
+                  }
+                  )
+    plt.figure(figsize=(10, 6))
+    plot_data = []
+
+    for model_name, trials in results.items():
+        for trial in trials:
+            plot_data.append({
+                'Model': model_name,
+                'Expert Noise': trial['expert_noise'],
+                'L1 Error': trial['metrics']['avg_l1_error'],
+            })
+        expert_noises = set([trail['expert_noise'] for trail in trials])
+        for expert_noise in expert_noises:
+            L1_values = np.array(
+                [trial['metrics']['avg_l1_error'] for trial in trials if trial['expert_noise'] == expert_noise])
+            L1_mean = float(np.mean(L1_values))
+            L1_sd = float(np.std(L1_values, ddof=1)) if L1_values.size > 1 else 0.0
+            count = int(L1_values.size)
+            print(
+                f"{model_name} | expert_noise={expert_noise} | mean={L1_mean:.6f} | sd={L1_sd:.6f} | n={count}")
+
+    df = pd.DataFrame(plot_data)
+    plot_obj = sns.lineplot(
+        data=df,
+        x='Expert Noise',
+        y='L1 Error',
+        hue='Model',
+        marker='o',
+        linewidth=2,
+        style='Model'
+    )
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1, vmin=0, vmax=1.2)
+    plt.ylim([_vmin, _vmax])
+    plt.title('Impact of Expert Knowledge Noise on Model Error (L1) - Data Size: ' + str(data_size))
+    plt.xlabel('Expert Noise')
+    plt.ylabel('Average L1 Error')
+    plt.legend(title='Model Type',
+               frameon=True,
+               loc='upper right',
+               framealpha=0.8
+               )
+    path = folder_name + "avg_l1_error_expert_noise_" + env_name + '_DS' + str(data_size) + '.png'
+    plt.savefig(path, bbox_inches='tight', pad_inches=0.05, dpi=300)
+    plt.tight_layout()
+    plt.show()
+
+def visualize_expert_noise_KL_trials(results, data_size='', env_name='',  folder_name=''):
+    sns.set_theme(style="whitegrid", context="talk",
+                  rc={
+                      "grid.color": ".9",
+                      "grid.linewidth": 1.0,
+                      "axes.edgecolor": ".3",
+                      "axes.linewidth": 0.8,
+                  }
+                  )
+    plt.figure(figsize=(10, 6))
+    plot_data = []
+
+    for model_name, trials in results.items():
+        for trial in trials:
+            KL_values = np.mean(trial['metrics']['final_kl'])
+            plot_data.append({
+                'Model': model_name,
+                'Expert Noise': trial['expert_noise'],
+                'KL Error': KL_values,
+            })
+
+        expert_noises = set([trail['expert_noise'] for trail in trials])
+        for expert_noise in expert_noises:
+            KL_values = np.array(
+                [np.mean(trial['metrics']['final_kl']) for trial in trials if trial['expert_noise'] == expert_noise])
+            KL_mean = float(np.mean(KL_values))
+            KL_sd = float(np.std(KL_values, ddof=1)) if KL_values.size > 1 else 0.0
+            count = int(KL_values.size)
+            print(
+                f"{model_name} | expert_noise={expert_noise} | mean={KL_mean:.6f} | sd={KL_sd:.6f} | n={count}")
+
+    df = pd.DataFrame(plot_data)
+
+    plot_obj = sns.lineplot(
+        data=df,
+        x='Expert Noise',
+        y='KL Error',
+        hue='Model',
+        marker='o',
+        linewidth=2,
+        style='Model',
+    )
+    _vmin, _vmax = _compute_lim_from_ci(plot_obj, margin=0.1, vmin=0, vmax=12.0)
+    plt.ylim([_vmin, _vmax])
+    plt.title('Impact of Expert Knowledge Noise on KL Divergence -  Data Size: ' + str(data_size))
+    plt.xlabel('Expert Noise')
+    plt.ylabel('Average KL divergence')
+    plt.legend(title='Model Type',
+               frameon=True,
+               loc='upper right',
+               framealpha=0.8)
+    path = folder_name + "KL_divergence_expert_noise_" + env_name + '_DS' + str(data_size) + '.png'
     plt.savefig(path, bbox_inches='tight', pad_inches=0.05, dpi=300)
     plt.tight_layout()
     plt.show()

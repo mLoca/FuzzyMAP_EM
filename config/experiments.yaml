@@ -402,10 +402,61 @@ experiments:
             integration_method: "mean"
 
 
-            lambda_T: 0.50
             lambda_O: 0.15
 
             alpha_ah: [0.01, 0.05, 0.1, 0.15, 0.20, 0.35, 0.5, 0.75, 1.0]
+
+  expert_knowledge_robustness:
+    active: True
+    description: "Study on the robustness of models against inaccurate expert knowledge."
+    environments: ["env_hard_healthcare_mvn"]
+    sequence_length: 3
+    folder_name: "res/expert_knowledge_robustness/"
+    dataset_sizes: [25]
+    noise_level: [0.01]
+    expert_noise_levels: [0.0, 0.1, 0.2, 0.4, 0.6, 0.8]
+    n_trials: 40
+
+    standard_params:
+        n_iterations: 500
+        tolerance: 1e-4
+        init_method: "random"
+
+    models:
+      - name: "Standard_EM"
+        class: "PomdpEM"
+        active: True
+        color: "blue"
+        marker: "o"
+        params:
+          parallel: False
+
+      - name: "Fuzzy_Static_EM"
+        class: "FuzzyPOMDP"
+        active: True
+        color: "red"
+        marker: "s"
+        params: &default_fuzzy_params_robust
+          use_fuzzy: True
+          parallel: False
+          lambda_T: 0.50
+          lambda_O: 0.15
+          hyperparameter_update_method: "static"
+          integration_method: "mean"
+          mc_samples: 150
+
+      - name: "Fuzzy_Adaptive_EM"
+        class: "FuzzyPOMDP"
+        active: True
+        color: "green"
+        marker: "D"
+        params:
+          <<: *default_fuzzy_params_robust
+          hyperparameter_update_method: "adaptive"
+          integration_method: "mean"
+          alpha_ah: 0.025
+          lambda_T: 0.50
+          lambda_O: 0.15
 
 variable_mappings:
   test: 0
