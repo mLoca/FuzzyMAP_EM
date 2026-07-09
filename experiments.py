@@ -1,4 +1,3 @@
-import torch
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import os
@@ -326,7 +325,7 @@ def _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model, seed, s
         start_time = time.time()
 
         model.initialize_with_kmeans(obs)
-        fit_ll = model.fit(
+        fit_ll, iterations = model.fit(
             obs, acts,
             max_iterations=standard_param.get("n_iterations", 100),
             tolerance=float(standard_param.get("tolerance", 1e-4))
@@ -348,11 +347,13 @@ def _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model, seed, s
                 env.states,
                 dist_type=env.distribution_type
             )
+            metrics["lambda_T"] = getattr(model, "lambda_T", None)
+            metrics["lambda_O"] = getattr(model, "lambda_O", None)
 
         elapsed_time = time.time() - start_time
         print(f" ... {model_name} finished in {elapsed_time:.2f}s. Final LL: {fit_ll:.2f}")
 
-        return fit_ll, elapsed_time, metrics
+        return fit_ll, elapsed_time, metrics, iterations
 
     except Exception as e:
         print(f" [Error] Model {model_name} failed: {e}")
@@ -366,10 +367,7 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
     Evaluates ALL models in 'model_configs_list' on this exact dataset.
     """
     env_type = env_config.get("env_type", "medical")
-    if env_type == "lightdark":
-        obs_index = {"x_coord": 0, "y_coord": 1}
-    else:
-        obs_index = {"test": 0, "symptoms": 1}
+    obs_index = {"test": 0, "symptoms": 1}
 
     if not os.path.exists(cache_dir) and use_cache:
         os.makedirs(cache_dir, exist_ok=True)
@@ -398,7 +396,7 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
         model_name = model_config["name"]
 
         if model_config["active"] is True:
-            fit_ll, elapsed_time, metrics = _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model,
+            fit_ll, elapsed_time, metrics, iterations = _train_and_evaluate_model(model_config, obs, acts, env, fuzzy_model,
                                                                       current_seed,
                                                                       standard_param)
 
@@ -412,12 +410,14 @@ def run_dataset_batch(exp_id, trial, env_config, data_size, seq_length, noise_sd
                 "trial": trial,
                 "final_log_likelihood": fit_ll,
                 "training_time_sec": elapsed_time,
+                "num_iterations": iterations,
                 "metrics": metrics
             }
             results_batch.append(result_entry)
 
-            print(f" Model {model_name} trained successfully in {elapsed_time:.2f} seconds.")
-            print(f"  Final metrics: {metrics}")
+            print(f" Model {model_name} - Error FM {expert_noise} trained successfully in {elapsed_time:.2f} seconds.")
+            print(f"  Final metrics: {metrics}\n")
+            print(f"  ")
             if use_cache:
                 with open(filepath, 'wb') as f:
                     pickle.dump(result_entry, f)
@@ -547,13 +547,6 @@ def main():
 
                     visualize_expert_noise_L1_trials(filtered_results, data_size=size, env_name=env_name, folder_name=folder_name)
                     visualize_expert_noise_KL_trials(filtered_results, data_size=size, env_name=env_name, folder_name=folder_name)
-                    
-                    for model_name, results in filtered_results.items():
-                        print(f"  Model: {model_name}")
-                        for res in results:
-                            print(f"   Expert Noise: {res['expert_noise']}, Trial: {res['trial']}, "
-                                  f"Final LL: {res['final_log_likelihood']:.2f}, "
-                                  f"Metrics: {res['metrics']}")
             else:
                 print(f" Environment: {env_name}")
                 noise_levels = sorted({res['noise_sd'] for results in model_results.values() for res in results})

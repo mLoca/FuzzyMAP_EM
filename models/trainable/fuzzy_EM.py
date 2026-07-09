@@ -34,7 +34,9 @@ class FuzzyPOMDP(PomdpEM):
                  alpha_ah=0.05,
                  lambda_min=0.0,
                  epsilon_prior=1e-4,
-                 action_mapping=None
+                 action_mapping=None, 
+                 lambda_max=1000,
+                 warm_start_pseudo_counts=0,
                  ):
         super().__init__(n_states, n_actions, obs_dim, verbose, parallel=parallel, seed=seed,
                          epsilon_prior=epsilon_prior, ensure_psd=ensure_psd)
@@ -67,6 +69,8 @@ class FuzzyPOMDP(PomdpEM):
         self.prev_fuzzy_counts_T = None
         self.prev_fuzzy_counts_O = None
         self.improvement = None
+        self.lambda_max = lambda_max
+        self.warm_start_pseudo_counts = warm_start_pseudo_counts
 
         # Fuzzy system for observations
         if use_fuzzy:
@@ -390,7 +394,7 @@ class FuzzyPOMDP(PomdpEM):
             for s in range(self.n_states):
                 emp_Sum_sq_O[s] += np.einsum('t,ti,tj->ij', gamma_i[:, s], obs_np, obs_np)
 
-        if self.use_fuzzy:
+        if self.use_fuzzy and iteration > self.warm_start_pseudo_counts:
             fuzzy_N_T, fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O = self._compute_fuzzy_pseudo_counts()
         else:
             fuzzy_N_T = np.zeros_like(self.transitions)
@@ -402,10 +406,10 @@ class FuzzyPOMDP(PomdpEM):
         if iteration > self.warm_start_update:
             if self.use_fuzzy and self.hp_method == "adaptive":
                 self._update_hyperparameters_adaptive(fuzzy_N_T, fuzzy_N_O, len(observations))
-            elif self.use_fuzzy and self.hp_method == "empirical_bayes":
+            elif self.use_fuzzy and self.hp_method == "empirical_bayes":        
                 self._empirical_bayes_transition(emp_N_T, fuzzy_N_T)
                 self._empirical_bayes_observation(emp_N_O, emp_Sum_O, emp_Sum_sq_O,
-                                                  fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O)
+                                                fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O)
 
         # Transitions
         if self.fix_transitions is None:
@@ -499,7 +503,7 @@ class FuzzyPOMDP(PomdpEM):
             print(f"An unexpected error occurred: {e}")
             raise Exception(e)
 
-        return log_likelihood
+        return log_likelihood, iteration
 
     def _update_hyperparameters_adaptive(self, curr_T_counts, curr_O_counts, n_sequences):
         VOLATILITY_THRESHOLD = 0
@@ -561,7 +565,7 @@ class FuzzyPOMDP(PomdpEM):
 
         # Apply gradient ascent step
         self.lambda_T += self.eb_lr_T * grad_lambda_T
-        self.lambda_T = np.maximum(self.lambda_T, 0)
+        self.lambda_T = np.clip(self.lambda_T, self.lambda_min, self.lambda_max)
 
     def _empirical_bayes_observation(self, emp_N_O, emp_Sum_O, emp_Sum_sq_O,
                                      fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O):
@@ -622,7 +626,7 @@ class FuzzyPOMDP(PomdpEM):
 
         # Apply gradient ascent step
         self.lambda_O += self.eb_lr_O * 1 / 10 * grad_lambda_O
-        self.lambda_O = np.maximum(self.lambda_O, 0)
+        self.lambda_O = np.clip(self.lambda_O, self.lambda_min, self.lambda_max)
 
     def _compute_cov_empirical_bayes(self, emp_N_O, emp_Sum_O, emp_Sum_sq_O,
                                      fuzzy_N_O, fuzzy_Sum_O, fuzzy_Sum_Sq_O, state):

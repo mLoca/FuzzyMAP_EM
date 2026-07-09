@@ -53,7 +53,7 @@ def run_pomdp_reconstruction(save_data = True, save_probabilities = True):
 
     fuzzy_pomdp.obs_covs = fuzzy_pomdp.obs_covs * 0.03
     fuzzy_pomdp.transition_inertia = 40
-    fuzzy_ll = fuzzy_pomdp.fit(
+    fuzzy_ll, iteration = fuzzy_pomdp.fit(
         observations, actions,
         max_iterations=300, tolerance=1e-3
     )

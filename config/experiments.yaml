@@ -412,9 +412,9 @@ experiments:
     environments: ["env_hard_healthcare_mvn"]
     sequence_length: 3
     folder_name: "res/expert_knowledge_robustness/"
-    dataset_sizes: [25]
+    dataset_sizes: [150]
     noise_level: [0.01]
-    expert_noise_levels: [0.0, 0.1, 0.2, 0.4, 0.6, 0.8]
+    expert_noise_levels: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
     n_trials: 40
 
     standard_params:
@@ -430,6 +430,16 @@ experiments:
         marker: "o"
         params:
           parallel: False
+          
+      - name: "Standard MAP"
+        class: "PomdpMAPEM"
+        active: True
+        params:
+          parallel: False
+          prior_alpha: 1.5
+          prior_mu0: 0.5
+          prior_kappa0: 0.5
+          prior_psi0: 0.0005
 
       - name: "Fuzzy_Static_EM"
         class: "FuzzyPOMDP"
@@ -439,8 +449,8 @@ experiments:
         params: &default_fuzzy_params_robust
           use_fuzzy: True
           parallel: False
-          lambda_T: 0.50
-          lambda_O: 0.15
+          lambda_T: 10
+          lambda_O: 1
           hyperparameter_update_method: "static"
           integration_method: "mean"
           mc_samples: 150
@@ -454,9 +464,53 @@ experiments:
           <<: *default_fuzzy_params_robust
           hyperparameter_update_method: "adaptive"
           integration_method: "mean"
-          alpha_ah: 0.025
-          lambda_T: 0.50
-          lambda_O: 0.15
+          alpha_ah: 0.5
+          lambda_min: 0.05
+          warm_start_update: 5
+          warm_start_pseudo_counts: 5
+          
+
+      - name: "Fuzzy_EB_EM"
+        class: "FuzzyPOMDP"
+        active: True
+        color: "cyan"
+        marker: "^"
+        params:
+          <<: *default_fuzzy_params_robust
+          hyperparameter_update_method: "empirical_bayes"
+          integration_method: "mean"
+          eb_learning_rate_T: 0.25
+          eb_learning_rate_O: 0.075
+          lambda_max: 15
+          lambda_min: 0.0
+          warm_start_pseudo_counts: 30
+          warm_start_update: 30
+
+  hyperparameter_grid_search_robustness:
+    active: False
+    description: "Grid Search for lambda rob."
+    environments: ["env_hard_healthcare_mvn"]
+    sequence_length: 3
+    dataset_sizes: [ 150 ]
+    noise_level: [ 0.01 ]
+    expert_noise_levels: [0.5]
+    n_trials: 5
+    standard_params:
+      n_iterations: 400
+      tolerance: 1e-4
+      init_method: "random"
+    models:
+      - name: "Fuzzy_Grid_Search"
+        class: "FuzzyPOMDP"
+        active: True
+        grid_search: True
+        params:
+          use_fuzzy: True
+          parallel: False
+          hyperparameter_update_method: "static"
+          integration_method: "mean"
+          lambda_T: [0, 1.0, 2.5, 5.0, 7.5, 10.0]
+          lambda_O: [0, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 2]
 
 variable_mappings:
   test: 0

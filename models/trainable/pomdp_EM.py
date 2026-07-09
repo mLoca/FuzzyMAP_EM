@@ -294,7 +294,7 @@ class PomdpEM:
             print(f"An unexpected error occurred: {e}")
             raise Exception(e)
 
-        return log_likelihood
+        return log_likelihood, iteration
     
 
 
